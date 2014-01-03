@@ -1,0 +1,11 @@
+  Api_age:       0
+  Api_current:   26
+  Api_revision:  0
+  Major:         2
+  Meta:          1
+  Micro:         5
+  Minor:         6
+  Name:          slurm
+  Release:       1
+  Release_tags:  dist
+  Version:       2.6.5
