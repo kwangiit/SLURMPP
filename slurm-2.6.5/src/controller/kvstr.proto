@@ -1,0 +1,6 @@
+message KVStr
+{
+    optional uint32 job_id = 1;
+    optional int32 num_item = 2;
+    repeated string name = 3;
+}
