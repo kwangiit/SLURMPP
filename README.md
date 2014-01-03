@@ -1,4 +1,4 @@
-SLURM--
+SLURMPP
 =======
 
-Distributed job launch prototype built on top of SLURM and ZHT
+SLURM++ Distributed Job Launch Prototype built on top of SLURM and ZHT
