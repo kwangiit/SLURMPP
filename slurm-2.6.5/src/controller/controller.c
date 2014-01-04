@@ -271,7 +271,6 @@ void _controller_req(slurm_msg_t* msg) {
 	if (msg == NULL) {
 		return;
 	}
-
 	if (msg->msg_type == MESSAGE_NODE_REGISTRATION_STATUS) {
 		_regist_msg_proc(msg);
 	} else if (msg->msg_type == REQUEST_STEP_COMPLETE) {

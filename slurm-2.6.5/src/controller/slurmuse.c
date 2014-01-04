@@ -925,7 +925,7 @@ void _opt_default_1(struct srun_options *opt_1)
 
 	opt_1->pty = false;
 	opt_1->open_mode = 0;
-	opt_1->acctg_freq = -1;
+	opt_1->acctg_freq = 0;
 	opt_1->cpu_freq = NO_VAL;
 	opt_1->reservation = NULL;
 	opt_1->wckey = NULL;
@@ -1842,6 +1842,7 @@ void set_options_1(const int argc, char **argv, struct srun_options *opt_1)
 		case LONG_OPT_ACCTG_FREQ:
 			opt_1->acctg_freq = _get_int(optarg, "acctg-freq",
                                 false);
+			printf("what is the hell:%s\n", opt_1->acctg_freq);
 			break;
 		case LONG_OPT_CPU_FREQ:
 		        if (cpu_freq_verify_param(optarg, &opt_1->cpu_freq))
@@ -2493,7 +2494,7 @@ int create_job_step_1(srun_job_t *job, bool use_all_cpus, struct srun_options *o
 	job->ctx_params.task_count = opt_1->ntasks;
 
 	if (opt_1->mem_per_cpu != NO_VAL)
-		job->ctx_params.mem_per_cpu = opt_1->mem_per_cpu;
+		//job->ctx_params.mem_per_cpu = opt_1->mem_per_cpu;
 	if (opt_1->gres)
 		job->ctx_params.gres = opt_1->gres;
 	else
