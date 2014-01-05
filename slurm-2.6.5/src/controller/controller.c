@@ -11,97 +11,144 @@
 #include "slurmctld.h"
 #include "slurmuse.h"
 
-int partition_size;
-int num_controller;
-char** mem_list_file = NULL;
-char** source = NULL;
-char* controller_id = NULL;
-int num_byte_per_node = 100;
-int job_desc_size = 100;
+int part_size;
+int num_ctrl;
+char **mem_list = NULL;
+char **source = NULL;
+char *self_id = NULL;
+char *resource = NULL;
+queue *job_queue = NULL;
+int num_regist_recv = 0;
+int ready = 0;
 
 int num_job = 0;
 int num_job_fin = 0;
 int num_job_fail = 0;
-pthread_mutex_t num_job_fin_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t num_job_fail_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t opt_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t callback_lookup_msg_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 int num_proc_thread = 0;
 int max_proc_thread = 0;
-int ratio_lookup = 0;
-int ratio_com_and_swap = 0;
 
 long long num_insert_msg = 0LL;
 long long num_lookup_msg = 0LL;
-long long num_comswap_msg = 0LL;
-long long num_callback_lookup_msg = 0LL;
-
-pthread_mutex_t insert_msg_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t lookup_msg_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t comswap_msg_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-pthread_mutex_t ratio_lookup_msg_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t ratio_comswap_msg_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-pthread_mutex_t time_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t num_proc_thread_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-char* node_count_list = NULL;
-queue* job_queue = NULL;
-
-int num_regist_recv = 0;
-int ready = 0;
-
-//char *slurm_conf_filename;
+long long num_cswap_msg = 0LL;
+long long num_callback_msg = 0LL;
 
 pthread_mutex_t regist_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t num_job_fin_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t num_job_fail_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t num_proc_thread_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t insert_msg_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t lookup_msg_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t cswap_msg_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t callback_msg_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t opt_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t time_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-struct timeval start;
-struct timeval end;
+struct timeval start, end;
 
-void _read_memlist(char*);
-void _read_workload(char*);
-void* _recv_msg_proc(void *no_data);
-void* _service_connection(void *arg);
-void _controller_req(slurm_msg_t*);
-void* _job_proc(void*);
-void _regist_msg_proc(slurm_msg_t*);
-void _step_complete_msg_proc(slurm_msg_t*);
-
-typedef struct connection_arg {
+typedef struct connection_arg
+{
 	int newsockfd;
 } connection_arg_t;
 
-int main(int argc, char *argv[]) {
+void _initialize(char**);
+void _read_memlist(char*);
+void _read_workload(char*);
+void* _recv_msg_proc(void*);
+void* _service_connection(void*);
+void _controller_req(slurm_msg_t*);
+void _regist_msg_proc(slurm_msg_t*);
+void _step_complete_msg_proc(slurm_msg_t*);
+void* _job_proc(void*);
+void _print_result(struct timeval*, struct timeval*);
+
+int main(int argc, char *argv[])
+{
 	/* there should be 8 arguments provided to the controller */
-	if (argc < 9) {
-		fprintf(stderr,
-				"usage:./controller slurm_conf_file numController memList partitionSize "
-						"workload zht_config_file zht_memlist num_proc_thread\n");
-		exit(-1);
+	if (argc < 9)
+	{
+		fprintf(stderr, "usage:./controller slurm_conf_file numController memList "
+				"partitionSize workload zht_config_file zht_memlist num_proc_thread\n");
+		exit(1);
 	}
 
+	_initialize(argv);
+
+	/* controller forks a new thread to receive messages coming to it*/
+	pthread_t *recv_msg_thread = (pthread_t*) malloc(sizeof(pthread_t));
+	while (pthread_create(recv_msg_thread, NULL, _recv_msg_proc, NULL))
+	{
+		fprintf(stderr, "pthread_create error!");
+		sleep(1);
+	}
+
+	/* blocked until all the slurmds have already registered*/
+	while (!ready)
+	{
+		usleep(1);
+	}
+
+	/* sleep for some time to ensure that all the other
+	 * controllers also finished registration */
+	sleep(30);
+
+	/* start to launch jobs */
+	gettimeofday(&start, 0x0); // get the starting time stamp
+
+	/* as long as there are still jobs in the queue,
+	 * forks a launching thread to launch the first job*/
+	while (job_queue->queue_length > 0)
+	{
+		if (num_proc_thread < max_proc_thread)
+		{
+			queue_item *job = del_first_queue(job_queue);
+			pthread_t *job_proc_thread = (pthread_t*) malloc(sizeof(pthread_t));
+			while (pthread_create(job_proc_thread, NULL, _job_proc, (void*) job))
+			{
+				fprintf(stderr, "pthread_create error!");
+				sleep(1);
+			}
+			pthread_mutex_lock(&num_proc_thread_mutex);
+			num_proc_thread++;
+			pthread_mutex_unlock(&num_proc_thread_mutex);
+		}
+		else
+		{
+			usleep(1);
+		}
+	}
+
+	/* blocked until all jobs are finished */
+	while (num_job_fin + num_job_fail < num_job)
+	{
+		usleep(1);
+	}
+
+	gettimeofday(&end, 0x0); // get the ending time stamp
+
+	_print_result(&end, &start);
+
+	/* sleep some time in case other controllers
+	 * need to talk for resource stealing */
+	sleep(10000);
+}
+
+void _initialize(char* argv[])
+{
 	slurm_conf_reinit(argv[1]); //load the slurm configuration file
+	self_id = strdup(slurmctld_conf.control_machine); //get the controller id
 
-	/* get the controller id */
-	controller_id = c_calloc(num_byte_per_node);
-	strcat(controller_id, slurmctld_conf.control_machine); //get the controller id
+	num_ctrl = str_to_int(argv[2]); // get the number of controllers
+	mem_list = c_calloc_2(num_ctrl, 30);
 
-	num_controller = str_to_int(argv[2]); // get the number of controllers
-
-	mem_list_file = c_malloc_2(num_controller, num_byte_per_node);
 	_read_memlist(argv[3]); // read the controller membership list
 
-	partition_size = str_to_int(argv[4]); //get the partition size
+	part_size = str_to_int(argv[4]); //get the partition size
+	source = c_calloc_2(part_size + 1, 30);
 
-	source = c_malloc_2(partition_size + 1, num_byte_per_node);
-
-	/* fill the node list of the controller (patition_size, node_1, node_2, ...)*/
-	node_count_list = c_calloc(partition_size * num_byte_per_node);
-	strcat(node_count_list, argv[4]);
-	strcat(node_count_list, ",");
+	/* fill the node list of the controller (part_size, node_1, node_2, ...) */
+	resource = c_calloc((part_size + 1) * 30);
+	strcat(resource, argv[4]); strcat(resource, ",");
 
 	/* read workload and fill it in the job queue*/
 	job_queue = init_queue();
@@ -111,100 +158,42 @@ int main(int argc, char *argv[]) {
 	c_zht_init(argv[6], argv[7]); // initialize the controller as a ZHT client
 
 	max_proc_thread = str_to_int(argv[8]);
-	/* controller forks a new thread to receive messages coming to it*/
-	pthread_t *recv_msg_thread = (pthread_t*) malloc(sizeof(pthread_t));
-	while (pthread_create(recv_msg_thread, NULL, _recv_msg_proc, NULL)) {
-		fprintf(stderr, "pthread_create error!");
-		sleep(1);
-	}
-
-	/* blocked until all the slurmds have already registered*/
-	while (!ready) {
-		usleep(1);
-	}
-
-	/* sleep for some time to ensure that all the other controllers also finished registration */
-	//sleep(30);
-	/* start to launch jobs */
-	gettimeofday(&start, 0x0); // get the starting time stamp
-
-	/* as long as there are still jobs in the queue,
-	 * forks a launching thread to launch the first job*/
-	while (job_queue->queue_length > 0) {
-		if (num_proc_thread < max_proc_thread) {
-			queue_item *job = del_first_queue(job_queue);
-			pthread_t *job_proc_thread = (pthread_t*) malloc(sizeof(pthread_t));
-			while (pthread_create(job_proc_thread, NULL, _job_proc, (void*) job)) {
-				fprintf(stderr, "pthread_create error!");
-				sleep(1);
-			}
-			pthread_mutex_lock(&num_proc_thread_mutex);
-			num_proc_thread++;
-			pthread_mutex_unlock(&num_proc_thread_mutex);
-		} else {
-			usleep(1);
-		}
-	}
-
-	/* blocked until all jobs are finished */
-	while (num_job_fin + num_job_fail < num_job) {
-		usleep(1);
-	}
-
-	gettimeofday(&end, 0x0); // get the ending time stamp
-
-	/* calculate the overall launching time */
-	long long time_diff = timeval_diff(NULL, &end, &start);
-	double time_s = time_diff / 1000000.0;
-
-	double throughput = num_job_fin / time_s; // calculate the throughput
-
-	/* printing out the measurement resutls */
-	fprintf(stdout, "I finished all the jobs in %.16f sec, and "
-			"the throughput is:%.16f jobs/sec\n", time_s, throughput);
-	fprintf(stdout, "The number of insert message is:%lld\n", num_insert_msg);
-	fprintf(stdout, "The number of lookup message is:%lld\n", num_lookup_msg);
-	fprintf(stdout, "The number of compare_swap message is:%lld\n",
-			num_comswap_msg);
-	fprintf(stdout, "The number of all message to ZHT is:%lld\n",
-			num_insert_msg + num_lookup_msg + num_comswap_msg);
-	fprintf(stdout, "The ratio of lookup message is:%d\n", ratio_lookup);
-	fprintf(stdout, "The ratio of compare and swap message is:%d\n",
-			ratio_com_and_swap);
-	fprintf(stdout, "The number of callback lookup message is:%lld\n",
-			num_callback_lookup_msg);
-
-	fflush(stdout);
-	//free(job_queue);
-	sleep(10000); // sleep some time in case other controllers need to talk for resource stealing
 }
 
-void _read_memlist(char *mem_file_path) {
+void _read_memlist(char *mem_file_path)
+{
 	int i = 0;
 	size_t ln = 0;
 	FILE* file = fopen(mem_file_path, "r");
 
-	if (file != NULL) {
+	if (file != NULL)
+	{
 		char line[100];
-		while (fgets(line, sizeof(line), file) != NULL) {
+		while (fgets(line, sizeof(line), file) != NULL)
+		{
 			ln = strlen(line);
-			if (line[ln - 1] == '\n') {
+			if (line[ln - 1] == '\n')
+			{
 				line[ln - 1] = '\0';
 			}
-			strcpy(mem_list_file[i++], line);
+			strcpy(mem_list[i++], line);
 		}
 	}
 }
 
-void _read_workload(char *file_path) {
+void _read_workload(char *file_path)
+{
 	FILE *file = fopen(file_path, "r");
 	size_t ln = 0;
 
-	if (file != NULL) {
+	if (file != NULL)
+	{
 		char line[100];
-		while (fgets(line, sizeof(line), file) != NULL) {
+		while (fgets(line, sizeof(line), file) != NULL)
+		{
 			ln = strlen(line);
-			if (line[ln - 1] == '\n') {
+			if (line[ln - 1] == '\n')
+			{
 				line[ln - 1] = '\0';
 			}
 			append_queue(job_queue, line);
@@ -212,54 +201,60 @@ void _read_workload(char *file_path) {
 	}
 }
 
-void *_recv_msg_proc(void *no_data) {
+void *_recv_msg_proc(void *no_data)
+{
 	slurm_fd_t sock_fd, new_sock_fd;
 	slurm_addr_t client_addr;
-	connection_arg_t *conn_arg = (connection_arg_t*) malloc(
-			sizeof(connection_arg_t));
+	connection_arg_t *conn_arg = (connection_arg_t*)malloc(sizeof(connection_arg_t));
 
 	sock_fd = slurm_init_msg_engine_addrname_port(slurmctld_conf.control_addr,
-			slurmctld_conf.slurmctld_port);
+												slurmctld_conf.slurmctld_port);
 
-	if (sock_fd == SLURM_SOCKET_ERROR) {
+	if (sock_fd == SLURM_SOCKET_ERROR)
+	{
 		fatal("slurm_init_msg_engine_addrname_port error %m");
 	}
 
-	while (1) {
-		if ((new_sock_fd = slurm_accept_msg_conn(sock_fd, &client_addr))
-				== SLURM_SOCKET_ERROR) {
-			//error("slurm_accept_msg_conn: %m");
+	while (1)
+	{
+		if ((new_sock_fd = slurm_accept_msg_conn(sock_fd,
+					&client_addr))== SLURM_SOCKET_ERROR)
+		{
+			error("slurm_accept_msg_conn: %m");
 			continue;
 		}
 
 		conn_arg->newsockfd = new_sock_fd;
 
-		pthread_t* serv_thread = (pthread_t*) malloc(sizeof(pthread_t));
-		if (pthread_create(serv_thread, NULL, _service_connection,
-				(void*) conn_arg)) {
+		pthread_t* serv_thread = (pthread_t*)malloc(sizeof(pthread_t));
+		while (pthread_create(serv_thread, NULL, _service_connection, (void*) conn_arg))
+		{
 			error("pthread_create error:%m");
+			sleep(1);
 		}
 	}
 
 	return NULL;
 }
 
-void *_service_connection(void* arg) {
+void *_service_connection(void* arg)
+{
 	connection_arg_t *conn = (connection_arg_t*) arg;
-	slurm_msg_t *msg = (slurm_msg_t*) malloc(sizeof(slurm_msg_t));
+	slurm_msg_t *msg = (slurm_msg_t*)malloc(sizeof(slurm_msg_t));
 	slurm_msg_t_init(msg);
 
-	if (slurm_receive_msg(conn->newsockfd, msg, 0) != 0) {
-		//error("slurm_receive_msg: %m");
+	if (slurm_receive_msg(conn->newsockfd, msg, 0) != 0)
+	{
+		error("slurm_receive_msg: %m");
 		slurm_close_accepted_conn(conn->newsockfd);
 		goto cleanup;
 	}
 
 	_controller_req(msg);
 
-	if ((conn->newsockfd >= 0)
-			&& slurm_close_accepted_conn(conn->newsockfd) < 0) {
-		//error("close(%d): %m", conn->newsockfd);
+	if ((conn->newsockfd >= 0) && slurm_close_accepted_conn(conn->newsockfd) < 0)
+	{
+		error("close(%d): %m", conn->newsockfd);
 	}
 
 	cleanup: free(msg);
@@ -267,67 +262,60 @@ void *_service_connection(void* arg) {
 	return NULL;
 }
 
-void _controller_req(slurm_msg_t* msg) {
-	if (msg == NULL) {
+void _controller_req(slurm_msg_t* msg)
+{
+	if (msg == NULL)
+	{
 		return;
 	}
-	if (msg->msg_type == MESSAGE_NODE_REGISTRATION_STATUS) {
+	if (msg->msg_type == MESSAGE_NODE_REGISTRATION_STATUS)
+	{
 		_regist_msg_proc(msg);
-	} else if (msg->msg_type == REQUEST_STEP_COMPLETE) {
+	}
+	else if (msg->msg_type == REQUEST_STEP_COMPLETE)
+	{
 		_step_complete_msg_proc(msg);
 	}
 }
 
-void *_job_proc(void* data) {
-	queue_item* job = (queue_item*) data;
-	int argc = 0;
-	char** job_desc = c_malloc_2(10, job_desc_size);
-	argc = split_str(job->job_description, " ", job_desc);
-	if (argc == 0) {
-		fprintf(stdout, "This job has some problem!\n");
-	} else if (!strcmp(job_desc[0], "srun")) {
-		drun_proc(argc, job_desc);
-	} else if (!strcmp(job_desc[0], "dcancel")) {
-		//dcancel_proc(job_origin_desc_left);
-	} else if (!strcmp(job_desc[0], "dinfo")) {
-		//dinfo_proc(job_origin_desc_left);
-	};
-	//free(job_desc);
-	pthread_exit(NULL);
-	return NULL;
-}
-
-void _regist_msg_proc(slurm_msg_t* msg) {
+void _regist_msg_proc(slurm_msg_t *msg)
+{
 	slurm_send_rc_msg(msg, SLURM_SUCCESS);
 	int num_insert_msg_local = 0;
 
 	pthread_mutex_lock(&regist_mutex);
 	char* target = ((slurm_node_registration_status_msg_t *) msg->data)->node_name;
-	if (!find_exist(source, target))
-	{
-		strcpy(source[num_regist_recv], target);
-		num_regist_recv++;
-		strcat(node_count_list,target);
 
-		if (num_regist_recv == partition_size) {
-			c_zht_insert(controller_id, node_count_list);
+	if (find_exist(source, target, part_size) >= 0)
+	{
+		strcpy(source[num_regist_recv++], target);
+		strcat(resource,target);
+
+		if (num_regist_recv == part_size)
+		{
+			c_zht_insert(self_id, resource);
 			ready = 1;
 			num_insert_msg_local++;
-			c_free(node_count_list);
-		} else {
-			strcat(node_count_list, ",");
+			c_free(resource);
+			c_free_2(source, part_size + 1);
+		}
+		else
+		{
+			strcat(resource, ",");
 		}
 	}
 	pthread_mutex_unlock(&regist_mutex);
 
-	if (num_insert_msg_local > 0) {
+	if (num_insert_msg_local > 0)
+	{
 		pthread_mutex_lock(&insert_msg_mutex);
 		num_insert_msg += num_insert_msg_local;
 		pthread_mutex_unlock(&insert_msg_mutex);
 	}
 }
 
-void _step_complete_msg_proc(slurm_msg_t* msg) {
+void _step_complete_msg_proc(slurm_msg_t* msg)
+{
 	slurm_send_rc_msg(msg, SLURM_SUCCESS);
 	step_complete_msg_t *complete = (step_complete_msg_t*) msg->data;
 	size_t ln;
@@ -497,7 +485,51 @@ void _step_complete_msg_proc(slurm_msg_t* msg) {
 	pthread_mutex_lock(&insert_msg_mutex);
 	num_insert_msg += num_insert_msg_local;
 	pthread_mutex_unlock(&insert_msg_mutex);
-	pthread_mutex_lock(&comswap_msg_mutex);
-	num_comswap_msg += num_comswap_msg_local;
-	pthread_mutex_unlock(&comswap_msg_mutex);
+	pthread_mutex_lock(&cswap_msg_mutex);
+	num_cswap_msg += num_comswap_msg_local;
+	pthread_mutex_unlock(&cswap_msg_mutex);
+}
+
+void *_job_proc(void* data)
+{
+	queue_item *job = (queue_item*) data;
+	char **job_desc = c_calloc_2(10, 30);
+	int count = split_str(job->job_description, " ", job_desc);
+	if (count == 0)
+	{
+		fprintf(stdout, "This job has some problem!\n");
+	}
+	else if (!strcmp(job_desc[0], "srun"))
+	{
+		drun_proc(count, job_desc);
+	}
+	else if (!strcmp(job_desc[0], "dcancel"))
+	{
+		//dcancel_proc(job_origin_desc_left);
+	}
+	else if (!strcmp(job_desc[0], "dinfo"))
+	{
+		//dinfo_proc(job_origin_desc_left);
+	};
+	//free(job_desc);
+	pthread_exit(NULL);
+	return NULL;
+}
+
+void _print_result(struct timeval *end_time, struct timeval *start_time)
+{
+	/* calculate the overall launching time */
+	long long time_diff = timeval_diff(NULL, end_time, start_time);
+	double time_s = time_diff / 1000000.0;
+	double throughput = num_job_fin / time_s; // calculate the throughput
+
+	/* printing out the measurement resutls */
+	fprintf(stdout, "I finished all the jobs in %.16f sec, and "
+			"the throughput is:%.16f jobs/sec\n", time_s, throughput);
+	fprintf(stdout, "The number of insert message is:%lld\n", num_insert_msg);
+	fprintf(stdout, "The number of lookup message is:%lld\n", num_lookup_msg);
+	fprintf(stdout, "The number of compare_swap message is:%lld\n", num_cswap_msg);
+	fprintf(stdout, "The number of all message to ZHT is:%lld\n", num_insert_msg +
+						num_lookup_msg + num_cswap_msg);
+	fflush(stdout);
 }

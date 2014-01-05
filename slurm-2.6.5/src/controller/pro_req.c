@@ -15,25 +15,87 @@
 #include <grp.h>
 #include "slurmuse.h";
 
-int _gen_random_value(int upper_bound) {
+typedef struct _job_resource
+{
+	int num_try;
+	int num_node;
+	char *nodelist;
+	char *ctrl_ids_1;
+	int num_ctrl;
+	char **ctrl_ids_2;
+	char **node_alloc;
+	int self;
+} job_resource;
+
+job_resource* init_job_resource()
+{
+	job_resource *a_job_res = (job_resource*)malloc(sizeof(job_resource));
+	a_job_res->num_try = 0;
+	a_job_res->num_node = 0;
+	a_job_res->nodelist = c_calloc(30 * part_size);
+	a_job_res->ctrl_ids_1 = c_calloc(30 * num_ctrl);
+	a_job_res->num_ctrl = 0;
+	a_job_res->ctrl_ids_2 = c_calloc_2(num_ctrl, 30);
+	a_job_res->node_alloc = c_calloc_2(num_ctrl, 30 * part_size);
+	a_job_res->self = 1;
+	return a_job_res;
+}
+
+void reset_job_resource(job_resource *a_job_res)
+{
+	if (a_job_res != NULL)
+	{
+		a_job_res->num_try = 0
+		a_job_res->num_node = 0;
+		c_memset(a_job_res->nodelist, 30 * part_size);
+		c_memset(a_job_res->ctrl_ids_1, 30 * num_ctrl);
+		int i = 0;
+		for (; i < num_ctrl; i++)
+		{
+			c_memset(a_job_res->ctrl_ids_2[i], 30);
+			c_memset(a_job_res->node_alloc[i], 30 * part_size);
+		}
+		a_job_res->self = 1;
+	}
+}
+
+void free_job_resource(job_resource *a_job_res)
+{
+	if (a_job_res != NULL)
+	{
+		c_free(a_job_res->nodelist);
+		c_free(a_job_res->ctrl_ids_1);
+		c_free_2(a_job_res->ctrl_ids_2, num_ctrl);
+		c_free_2(a_job_res->node_alloc, num_ctrl);
+		free(a_job_res);
+		a_job_res = NULL;
+	}
+}
+
+int _gen_random_value(int upper_bound)
+{
 	return rand() % upper_bound;
 }
 
-int _become_user(struct srun_options *opt_1) {
+int _become_user(struct srun_options *opt_1)
+{
 	char *user = uid_to_string(opt_1->uid);
 	gid_t gid = gid_from_uid(opt_1->uid);
 
-	if (strcmp(user, "nobody") == 0) {
+	if (strcmp(user, "nobody") == 0)
+	{
 		xfree(user);
 		return (error("Invalid user id %u: %m", opt_1->uid));
 	}
 
-	if (opt_1->uid == getuid()) {
+	if (opt_1->uid == getuid())
+	{
 		xfree(user);
 		return (0);
 	}
 
-	if ((opt_1->egid != (gid_t) -1) && (setgid(opt_1->egid) < 0)) {
+	if ((opt_1->egid != (gid_t) -1) && (setgid(opt_1->egid) < 0))
+	{
 		xfree(user);
 		return (error("setgid: %m"));
 	}
@@ -47,35 +109,45 @@ int _become_user(struct srun_options *opt_1) {
 	return (0);
 }
 
-int _shepard_spawn(srun_job_t *job, bool got_alloc) {
+int _shepard_spawn(srun_job_t *job, bool got_alloc)
+{
 	int shepard_pipe[2], rc;
 	pid_t shepard_pid;
 	char buf[1];
 
-	if (pipe(shepard_pipe)) {
+	if (pipe(shepard_pipe))
+	{
 		error("pipe: %m");
 		return -1;
 	}
 
 	shepard_pid = fork();
-	if (shepard_pid == -1) {
+	if (shepard_pid == -1)
+	{
 		error("fork: %m");
 		return -1;
 	}
-	if (shepard_pid != 0) {
+	if (shepard_pid != 0)
+	{
 		close(shepard_pipe[0]);
 		return shepard_pipe[1];
 	}
 
 	/* Wait for parent to notify of completion or I/O error on abort */
 	close(shepard_pipe[1]);
-	while (1) {
+	while (1)
+	{
 		rc = read(shepard_pipe[0], buf, 1);
-		if (rc == 1) {
+		if (rc == 1)
+		{
 			exit(0);
-		} else if (rc == 0) {
+		}
+		else if (rc == 0)
+		{
 			break; /* EOF */
-		} else if (rc == -1) {
+		}
+		else if (rc == -1)
+		{
 			if ((errno == EAGAIN) || (errno == EINTR))
 				continue;
 			break;
@@ -90,19 +162,234 @@ int _shepard_spawn(srun_job_t *job, bool got_alloc) {
 	return -1;
 }
 
-int _get_index(char *ctl_id) {
+int _get_index(char *ctl_id)
+{
 	int i = 0;
-	for (i = 0; i < num_controller; i++) {
-		if (!strcmp(ctl_id, mem_list_file[i])) {
+	for (i = 0; i < num_ctrl; i++)
+	{
+		if (!strcmp(ctl_id, mem_list[i]))
+		{
 			break;
 		}
 	}
 	return i;
 }
 
+char *get_ctrl_res(char *ctrl_id)
+{
+	char *ctrl_res = c_calloc((part_size + 1) * 30);
+	int len = c_zht_lookup(ctrl_id, ctrl_res);
+	if (len == 0)
+	{
+		c_free(ctrl_res);
+		return NULL;
+	}
+	else
+	{
+		return ctrl_res;
+	}
+}
+
+void release_res(job_resource *a_job_res)
+{
+	if (a_job_res->num_ctrl > 0)
+	{
+		char *query_value = c_calloc((part_size + 1) * 30);
+		char *node_ass_copy = c_calloc(
+				partition_size * num_byte_per_node);
+		char *pre_node_ass = c_calloc(
+				partition_size * num_byte_per_node);
+		char *pre_node_ass_copy = c_calloc(
+				partition_size * num_byte_per_node);
+		char *node_ass_new = c_calloc(
+				partition_size * num_byte_per_node);
+		char *result = c_calloc((part_size + 1) * 30);
+		for (i = 0; i < a_job_res->num_ctrl; i++)
+		{
+			c_memset(query_value, (part_size + 1) * 30);
+			char *ctrl_pre_res = get_ctrl_res(a_job_res->ctrl_ids_2[i]);
+			char *ctrl_pre_res_backup = strdup(ctrl_pre_res);
+			char *ctrl_add_res_backup = strdup(a_job_res->node_alloc[i]);
+			int j, k;
+			again_1: j = k = 0;
+			c_memset(pre_node_ass, partition_size * num_byte_per_node);
+			c_memset(node_ass_copy, partition_size * num_byte_per_node);
+			c_memset(pre_node_ass_copy,
+					partition_size * num_byte_per_node);
+			c_memset(node_ass_new, partition_size * num_byte_per_node);
+			if (!flag) {
+				c_zht_lookup(ctl_ids[i], pre_node_ass);
+				num_lookup_msg_local++;
+			} else {
+				strcpy(pre_node_ass, query_value);
+			}
+			strcpy(pre_node_ass_copy, pre_node_ass);
+			strcpy(node_ass_copy, node_ass[i]);
+			j = 0;
+			k = 0;
+			char **pre = c_malloc_2(partition_size + 2, num_byte_per_node);
+			j = split_str(pre_node_ass, ",", pre);
+			char **add = c_malloc_2(partition_size + 2, num_byte_per_node);
+			k = split_str(node_ass_copy, ",", add);
+
+			char *str_1 = int_to_str(j + k - 1);
+			strcat(node_ass_new, str_1);
+			strcat(node_ass_new, ",");
+			c_free(str_1);
+			int idx = 1;
+			for (; idx < j; idx++) {
+				strcat(node_ass_new, pre[idx]);
+				strcat(node_ass_new, ",");
+			}
+			for (idx = 0; idx < k; idx++) {
+				strcat(node_ass_new, add[idx]);
+				if (idx != k - 1) {
+					strcat(node_ass_new, ",");
+				}
+			}
+			/*for (idx = 0; idx < partition_size + 2; idx++) {
+				c_free(pre[idx]);
+				c_free(add[idx]);
+			}*/
+			if (pre != NULL)
+			{
+				free(pre);
+				pre = NULL;
+			}
+			if (add != NULL)
+			{
+				free(add);
+				add = NULL;
+			}
+			num_comswap_msg_local++;
+			if (c_zht_compare_swap(ctl_ids[i], pre_node_ass_copy,
+					node_ass_new, query_value) != 0) {
+				flag = 1;
+				goto again_1;
+			}
+		}
+		c_free(node_ass_copy);
+		c_free(pre_node_ass);
+		c_free(pre_node_ass_copy);
+		c_free(node_ass_new);
+		//sleep(poll_interval);
+		flag = 0;
+		goto again;
+
+	reset_job_resource(a_job_res);
+}
+
+void update_job_resource(
+						    job_resource *a_job_res,
+						    int num_node_allocated,
+						    char *ctrl_id,
+						    char *nodelist)
+{
+	a_job_res->num_try = 0;
+	a_job_res->num_node += num_node_allocated;
+	strcat(a_job_res->nodelist, nodelist);
+	int index = find_exist(a_job_res->ctrl_ids_2, ctrl_id, num_ctrl);
+	if (index < 0)
+	{
+		strcat(a_job_res->ctrl_ids_1, ctrl_id);
+		strcat(a_job_res->ctrl_ids_1, ",");
+		strcat(a_job_res->ctrl_ids_2[a_job_res->num_ctrl], ctrl_id);
+		strcat(a_job_res->node_alloc[a_job_res->num_ctrl], nodelist);
+		strcat(a_job_res->node_alloc[a_job_res->num_ctrl], ",");
+		a_job_res->num_ctrl++;
+	}
+	else
+	{
+		strcat(a_job_res->node_alloc[index], nodelist);
+		strcat(a_job_res->node_alloc[index], ",");
+	}
+	int self_idx = _get_index(self_id);
+	int ctrl_idx = _get_index(ctrl_id);
+	if (ctrl_idx < self_idx)
+	{
+		a_job_res->self = 0;
+	}
+}
+
+int do_allocate(
+				  char *ctrl_id,
+				  char *ctrl_res,
+				  job_resource *a_job_res,
+				  char *query_value,
+				  int num_more_node)
+{
+	char *ctrl_res_copy = strdup(ctrl_res);
+	char *p[part_size + 1];
+	split_str(ctrl_res, ",", p);
+	int num_node = str_to_int(p[0]);
+	if (num_node > 0)
+	{
+		int num_node_attempt = num_node > num_more_node ? num_more_node : num_node;
+		int len = strlen(p[0]);
+		(*p) += len;
+		char *nodelist = _allocate_node(ctrl_id, ctrl_res, p,
+					num_node_attempt, num_node, query_value);
+		if (nodelist == NULL)
+		{
+			return 0;
+		}
+		else
+		{
+			update_job_resource(a_job_res, num_node_attempt, ctrl_id, nodelist);
+			return 1;
+		}
+	}
+	else
+	{
+		return -1;
+	}
+}
+
+void allocate_one_res(char *ctrl_id, job_resource *a_job_res, int num_more_node)
+{
+	char *ctrl_res = get_ctrl_res(ctrl_id);
+	if (ctrl_res == NULL)
+	{
+		a_job_res->num_try++;
+	}
+	else
+	{
+		char *query_value = c_calloc((part_size + 1) * 30);
+		int ret = do_allocate(ctrl_id, ctrl_res, a_job_res, query_value, num_more_node);
+		while (ret == 0)
+		{
+			strcat(ctrl_res, query_value);
+			ret = do_allocate(ctrl_id, ctrl_res, a_job_res, query_value, num_more_node);
+		}
+		if (ret < 0)
+		{
+			a_job_res->num_try++;
+			usleep(100000);
+		}
+	}
+}
+
+job_resource *allocate_res(int num_node_required)
+{
+	job_resource *a_job_res = init_job_resource();
+	char *ctrl_id = self_id;
+	while (a_job_res->num_node < num_node_required)
+	{
+		allocate_one_res(ctrl_id, a_job_res, num_node_required - a_job_res->num_node);
+		if (a_job_res->num_try > 3)
+		{
+			release_res(a_job_res);
+		}
+		ctrl_id = mem_list[_gen_random_value(num_ctrl)];
+	}
+	return a_job_res;
+}
+
+
 void _create_srun_job(srun_job_t **p_job, env_t *env,
-		slurm_step_launch_callbacks_t *step_callbacks,
-		struct srun_options *opt_1) {
+						slurm_step_launch_callbacks_t *step_callbacks,
+						struct srun_options *opt_1)
+{
 	unsigned int iseed = (unsigned int) time(NULL);
 	srand(iseed);
 	srun_job_t *job = NULL;
@@ -645,7 +932,62 @@ void _set_submit_dir_env(void) {
 	}
 }
 
-extern void drun_proc(int argc, char **job_char_desc) {
+void check_job_belong(srun_job_t *job)
+{
+	char *exist = c_calloc(30);
+	char str[20] = { 0 }; sprintf(str, "%u", job->jobid);
+	char *key = c_calloc(100);
+	strcpy(key, str); strcat(key, self_id);
+	size_t ln;
+	int num_lookup_msg_local = 0;
+	c_zht_lookup(key, exist);
+	num_lookup_msg_local++;
+	int num_callback_msg_local = 0;
+	if (strcmp(exist, "I am here"))
+	{
+		strcat(key, "Fin");
+		char *fin = c_calloc(10);
+		//c_state_change_callback(key, "Finished");
+		c_zht_lookup(key, fin);
+		num_lookup_msg_local++;
+		while (1)
+		{
+			if (!strcmp(fin, "Finished") || num_job_fin + num_job_fail >= num_job)
+			{
+				c_free(fin);
+				break;
+			}
+			else
+			{
+				usleep(100000);
+				c_memset(fin, 10);
+				c_zht_lookup(key, fin);
+				num_lookup_msg_local++;
+			}
+		}
+		if (num_job_fin + num_job_fail < num_job)
+		//num_callback_lookup_msg_local++;
+		{
+			pthread_mutex_lock(&num_job_fin_mutex);
+			num_job_fin++;
+			pthread_mutex_unlock(&num_job_fin_mutex);
+		}
+	}
+	c_free(exist);
+	c_free(key);
+	pthread_mutex_lock(&lookup_msg_mutex);
+	num_lookup_msg += num_lookup_msg_local;
+	pthread_mutex_unlock(&lookup_msg_mutex);
+	if (!num_callback_msg_local)
+	{
+		pthread_mutex_lock(&callback_msg_mutex);
+		num_callback_msg += num_callback_msg_local;
+		pthread_mutex_unlock(&callback_msg_mutex);
+	}
+}
+
+extern void drun_proc(int count, char **job_char_desc)
+{
 	int debug_level;
 	env_t *env = xmalloc(sizeof(env_t));
 	log_options_t logopt = LOG_OPTS_STDERR_ONLY;
@@ -670,19 +1012,19 @@ extern void drun_proc(int argc, char **job_char_desc) {
 
 	if (slurm_select_init(1) != SLURM_SUCCESS)
 		fatal("failed to initialize node selection plugin");
-
 	if (switch_init() != SLURM_SUCCESS)
 		fatal("failed to initialize switch plugin");
 
-	struct srun_options *opt_1 = (struct srun_options*) calloc(1,
-			sizeof(struct srun_options));
+	struct srun_options *opt_1 = (struct srun_options*)calloc(
+									1, sizeof(struct srun_options));
 	int global_rc = 0;
 
 	if (xsignal_block(sig_array) < 0)
 		error("Unable to block signals");
 
 	init_spank_env();
-	if (spank_init(NULL) < 0) {
+	if (spank_init(NULL) < 0)
+	{
 		error("Plug-in initialization failed");
 		exit(error_exit);
 	}
@@ -692,23 +1034,22 @@ extern void drun_proc(int argc, char **job_char_desc) {
 	if (atexit((void (*)(void)) spank_fini) < 0)
 		error("Failed to register atexit handler for plugins: %m");
 
-	/* set default options, process commandline arguments, and
-	 * verify some basic values
-	 */
-
 	pthread_mutex_unlock(&global_mutex);
-	initialize_and_process_args_1(argc, job_char_desc, opt_1);
+
+	initialize_and_process_args_1(count, job_char_desc, opt_1);
 
 	record_ppid();
 
-	if (spank_init_post_opt() < 0) {
+	if (spank_init_post_opt() < 0)
+	{
 		error("Plugin stack post-option processing failed.");
 		exit(error_exit);
 	}
 
 	/* reinit log with new verbosity (if changed by command line)
 	 */
-	if (&logopt && (_verbose || opt_1->quiet)) {
+	if (&logopt && (_verbose || opt_1->quiet))
+	{
 		/* If log level is already increased, only increment the
 		 *   level to the difference of _verbose an LOG_LEVEL_INFO
 		 */
@@ -717,86 +1058,46 @@ extern void drun_proc(int argc, char **job_char_desc) {
 		logopt.stderr_level -= opt_1->quiet;
 		logopt.prefix_level = 1;
 		log_alter(logopt, 0, NULL);
-	} else
+	}
+	else
 		_verbose = debug_level;
 	(void) _set_rlimit_env(opt_1);
 	_set_prio_process_env();
 	(void) _set_umask_env(opt_1);
 	_set_submit_dir_env();
+
+	/* create a job structure of SLURM*/
 	srun_job_t *job = NULL;
 	_create_srun_job(&job, env, &step_callbacks, opt_1);
+
 	opt_1->spank_job_env = NULL;
 	opt_1->spank_job_env_size = 0;
 
-	if (job) {
+	if (job)
+	{
 		_enhance_env(env, job, &step_callbacks, opt_1);
-		//pre_launch_srun_job(job, 0, 1);
-		//launch_common_set_stdio_fds_1(job, &cio_fds, opt_1);
-		launch_g_step_launch_1(job, &cio_fds, &global_rc, &step_callbacks,
-				opt_1);
+		launch_g_step_launch_1(job, &cio_fds, &global_rc, &step_callbacks, opt_1);
+
 		pthread_mutex_lock(&num_proc_thread_mutex);
 		num_proc_thread--;
 		pthread_mutex_unlock(&num_proc_thread_mutex);
+
 		if (opt_1 != NULL)
 		{
 			free(opt_1);
 			opt_1 = NULL;
 		}
-		char *exist = c_calloc(num_byte_per_node);
-		char str[20] = { 0 };
-		sprintf(str, "%u", job->jobid);
-		char *key = c_calloc(3 * num_byte_per_node);
-		strcat(key, str);
-		strcat(key, controller_id);
-		size_t ln;
-		int num_lookup_msg_local = 0;
-		c_zht_lookup(key, exist);
-		num_lookup_msg_local++;
-		int num_callback_lookup_msg_local = 0;
-		if (strcmp(exist, "I am here")) {
-			strcat(key, "Fin");
-			char *fin = c_calloc(num_byte_per_node);
-			//c_state_change_callback(key, "Finished");
-			c_zht_lookup(key, fin);
-			num_lookup_msg_local++;
-			while (1) {
-				if (!strcmp(fin, "Finished") || num_job_fin + num_job_fail >= num_job) {
-					c_free(fin);
-					break;
-				} else {
-					usleep(100000);
-					c_memset(fin, num_byte_per_node);
-					c_zht_lookup(key, fin);
-					num_lookup_msg_local++;
-				}
-			}
-			if (num_job_fin + num_job_fail < num_job)
-			//num_callback_lookup_msg_local++;
-			{
-				pthread_mutex_lock(&num_job_fin_mutex);
-				num_job_fin++;
-				//fprintf(stdout, "The Number of jobs finished is:%d\n", num_job_fin);
-				//fflush(stdout);
-				pthread_mutex_unlock(&num_job_fin_mutex);
-			}
-		}
-		c_free(exist);
-		c_free(key);
-		pthread_mutex_lock(&lookup_msg_mutex);
-		num_lookup_msg += num_lookup_msg_local;
-		pthread_mutex_unlock(&lookup_msg_mutex);
-		if (!num_callback_lookup_msg_local)
-		{
-			pthread_mutex_lock(&callback_lookup_msg_mutex);
-			num_callback_lookup_msg += num_callback_lookup_msg_local;
-			pthread_mutex_unlock(&callback_lookup_msg_mutex);
-		}
+		check_job_belong(job);
 	}
 	//fini_srun(job, got_alloc, &global_rc, 0);
 }
 
-void dcancel_proc(char *job_char_desc) {
+void dcancel_proc(char *job_char_desc)
+{
+	// to be continued;
 }
 
-void dinfo_proc(char *job_char_desc) {
+void dinfo_proc(char *job_char_desc)
+{
+	// to be continued;
 }

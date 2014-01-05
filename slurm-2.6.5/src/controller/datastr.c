@@ -74,51 +74,58 @@ extern queue_item* del_first_queue(queue* q) {
 	return h;
 }
 
-extern char* _allocate_node(char* key, char* seen_value,
-		char** seen_value_array, int num_node_allocate, int num_node_before,
-		char* query_value) {
+extern char* _allocate_node(
+								char* key,
+								char* seen_value,
+								char** seen_value_array,
+								int num_node_allocate,
+								int num_node_before,
+								char* query_value)
+{
 	int i = 0;
-	char* nodelist = c_calloc(partition_size * num_byte_per_node);
-	char* new_value = c_calloc(partition_size * num_byte_per_node);
+	char *nodelist = c_calloc(part_size * 30);
+	char *new_value = c_calloc(part_size * 30);
 	int num_node_left = num_node_before - num_node_allocate;
 	char *_num_node_left = int_to_str(num_node_left);
-	//usleep(1000);
-	//pthread_mutex_lock(&time_mutex);
-	//ntime++;
-	//pthread_mutex_unlock(&time_mutex);
 	strcat(new_value, _num_node_left);
-	c_free(_num_node_left);
 	strcat(new_value, ",");
-	for (i = 0; i < num_node_allocate; i++) {
+	for (i = 0; i < num_node_allocate; i++)
+	{
 		strcat(nodelist, seen_value_array[i]);
-		if (i != num_node_allocate - 1) {
+		if (i != num_node_allocate - 1)
+		{
 			strcat(nodelist, ",");
 		}
 	}
-	for (i = 0; i < num_node_left; i++) {
+	for (i = 0; i < num_node_left; i++)
+	{
 		strcat(new_value, seen_value_array[i + num_node_allocate]);
-		if (i != num_node_left - 1) {
+		if (i != num_node_left - 1)
+		{
 			strcat(new_value, ",");
 		}
 	}
 	int res = c_zht_compare_swap(key, seen_value, new_value, query_value);
-	pthread_mutex_lock(&ratio_comswap_msg_mutex);
-	ratio_com_and_swap++;
-	pthread_mutex_unlock(&ratio_comswap_msg_mutex);
 	c_free(new_value);
-	if (!res) {
+	c_free(_num_node_left);
+	if (!res)
+	{
 		return nodelist;
-	} else {
+	}
+	else
+	{
 		c_free(nodelist);
 		return NULL;
 	}
 }
 
-extern char* c_calloc(int size) {
-	char* str = (char*) calloc(size, sizeof(char));
-	while (!str) {
+extern char* c_calloc(int size)
+{
+	char* str = (char*)calloc(size, sizeof(char));
+	while (!str)
+	{
 		sleep(1);
-		str = (char*) calloc(size, sizeof(char));
+		str = (char*)calloc(size, sizeof(char));
 	}
 	return str;
 }
@@ -140,7 +147,21 @@ extern void c_free(char *str)
 	}
 }
 
-extern char** c_malloc_2(int first_dim, int second_dim) {
+extern void c_free_2(char **str, int size)
+{
+	int i = 0;
+	for (; i < size; i++)
+	{
+		c_free(str[i]);
+	}
+	if (str != NULL)
+	{
+		free(str);
+		str = NULL;
+	}
+}
+
+extern char** c_calloc_2(int first_dim, int second_dim) {
 	char** str = (char**) calloc(first_dim, sizeof(char*));
 	int i = 0;
 	for (; i < first_dim; i++) {
@@ -155,21 +176,51 @@ extern char* int_to_str(int num) {
 	return str;
 }
 
-extern int str_to_int(char* str) {
+extern int str_to_int(char* str)
+{
 	char **end = NULL;
 	int num = (int) (strtol(str, end, 10));
 	return num;
 }
 
-extern int split_str(char* str, char* delim, char** res) {
-	int i = 0;
-	char *pch = NULL;
-	res[i] = strtok_r(str, delim, &pch);
-	while (res[i] != NULL && res[i] != "") {
-		i++;
-		res[i] = strtok_r(NULL, delim, &pch);
+extern int split_str(char *str, char *delim, char **res)
+{
+	int count = 0;
+	char *pch, *token;
+
+	token = strtok_r(str, delim, &pch);
+
+	while (token != NULL)
+	{
+		res[count++] = token;
+		token = strtok_r(NULL, delim, &pch);
 	}
-	return i;
+
+	return count;
+}
+
+extern void merge_res_str(char *part1, char* part2, char *result)
+{
+	char *p1[part_size + 1], *p2[part_size + 1];
+	int c1 = split_str(part1, ",", p1);
+	int c2 = split_str(part2, ",", p2);
+	char *num_node = int_to_str(c1 + c2 - 1);
+	strcat(result, num_node); strcat(result, ",");
+	free(num_node);
+	int i = 1;
+	for (; i < c1; i++)
+	{
+		strcat(result, p1[i]);
+		strcat(result, ",");
+	}
+	for (i = 0; i < c2; i++)
+	{
+		strcat(result, p2[i]);
+		if (i != c2 - 1)
+		{
+			strcat(result, ",");
+		}
+	}
 }
 
 //extern char** split_str(char* str, char* delim, int first_dim, int second_dim) {
@@ -196,27 +247,25 @@ extern int get_size(char** str) {
 	return size;
 }
 
-extern int find_exist(char** source, char* target)
+extern int find_exist(char **source, char *target, int size)
 {
-	int exist = 0;
-	int i = 0;
-	char* tmp = source[i];
-	while (tmp && strcmp(tmp, "") && strcmp(tmp, "\0"))
+	int count = 0;
+	char* tmp = source[count];
+
+	while (tmp != NULL && strcmp(tmp, "") && strcmp(tmp, "\0"))
 	{
-		fflush(stdout);
 		if (!strcmp(tmp, target))
 		{
-			exist = 1;
-			break;
+			return count;
 		}
-		i++;
-		if (i > 50)
+		count++;
+		if (count >= size)
 		{
-			break;
+			return -1;
 		}
-		tmp = source[i];
+		tmp = source[count];
 	}
-	return exist;
+	return -1;
 }
 
 long long timeval_diff(struct timeval *difference, struct timeval *end_time,
