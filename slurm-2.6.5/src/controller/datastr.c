@@ -24,7 +24,7 @@ extern void append_queue(queue* q, char* job_description) {
 		return;
 	}
 
-	new_item->job_description = c_calloc(job_desc_size);
+	new_item->job_description = c_calloc(100);
 	strcpy(new_item->job_description, job_description);
 	new_item->next = NULL;
 
@@ -72,6 +72,97 @@ extern queue_item* del_first_queue(queue* q) {
 	}
 
 	return h;
+}
+
+extern job_resource* init_job_resource()
+{
+	job_resource *a_job_res = (job_resource*)malloc(sizeof(job_resource));
+	a_job_res->num_try = 0;
+	a_job_res->num_node = 0;
+	a_job_res->nodelist = c_calloc(30 * part_size);
+	a_job_res->ctrl_ids_1 = c_calloc(30 * num_ctrl);
+	a_job_res->num_ctrl = 0;
+	a_job_res->ctrl_ids_2 = c_calloc_2(num_ctrl, 30);
+	a_job_res->node_alloc = c_calloc_2(num_ctrl, 30 * part_size);
+	a_job_res->self = 1;
+	return a_job_res;
+}
+
+extern void reset_job_resource(job_resource *a_job_res)
+{
+	if (a_job_res != NULL)
+	{
+		a_job_res->num_try = 0;
+		a_job_res->num_node = 0;
+		c_memset(a_job_res->nodelist, 30 * part_size);
+		c_memset(a_job_res->ctrl_ids_1, 30 * num_ctrl);
+		int i = 0;
+		for (; i < num_ctrl; i++)
+		{
+			c_memset(a_job_res->ctrl_ids_2[i], 30);
+			c_memset(a_job_res->node_alloc[i], 30 * part_size);
+		}
+		a_job_res->self = 1;
+	}
+}
+
+extern void free_job_resource(job_resource *a_job_res)
+{
+	if (a_job_res != NULL)
+	{
+		c_free(a_job_res->nodelist);
+		c_free(a_job_res->ctrl_ids_1);
+		c_free_2(a_job_res->ctrl_ids_2, num_ctrl);
+		c_free_2(a_job_res->node_alloc, num_ctrl);
+		free(a_job_res);
+		a_job_res = NULL;
+	}
+}
+
+extern void release_res(job_resource *a_job_res)
+{
+	if (a_job_res->num_ctrl > 0)
+	{
+		char *query_value = c_calloc((part_size + 1) * 30);
+		char *result = c_calloc((part_size + 1) * 30);
+		char *ctrl_pre_res_backup = c_calloc((part_size + 1) * 30);
+		char *ctrl_add_res_backup = c_calloc((part_size + 1) * 30);
+
+		int i = 0;
+		for (; i < a_job_res->num_ctrl; i++)
+		{
+			c_memset(query_value, (part_size + 1) * 30);
+			c_memset(ctrl_pre_res_backup, (part_size + 1) * 30);
+			c_memset(ctrl_add_res_backup, (part_size + 1) * 30);
+			char *ctrl_pre_res = get_ctrl_res(a_job_res->ctrl_ids_2[i]);
+			strcpy(ctrl_pre_res_backup, ctrl_pre_res);
+			strcpy(ctrl_add_res_backup, a_job_res->node_alloc[i]);
+			while (1)
+			{
+				c_memset(result, (part_size + 1) * 30);
+				merge_res_str(ctrl_pre_res_backup, ctrl_add_res_backup, result);
+				if (c_zht_compare_swap(a_job_res->ctrl_ids_2[i],
+						ctrl_pre_res, result, query_value) != 0)
+				{
+					c_memset(ctrl_pre_res, strlen(ctrl_pre_res));
+					c_memset(ctrl_pre_res_backup, strlen(ctrl_pre_res_backup));
+					c_memset(ctrl_add_res_backup, strlen(ctrl_add_res_backup));
+					strcpy(ctrl_pre_res, query_value);
+					strcpy(ctrl_pre_res_backup, ctrl_pre_res);
+					strcpy(ctrl_add_res_backup, a_job_res->node_alloc[i]);
+				}
+				else
+				{
+					c_free(ctrl_pre_res);
+					break;
+				}
+			}
+		}
+		c_free(query_value);
+		c_free(result);
+		c_free(ctrl_pre_res_backup);
+		c_free(ctrl_add_res_backup);
+	}
 }
 
 extern char* _allocate_node(

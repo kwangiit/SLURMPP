@@ -58,6 +58,7 @@ void* _recv_msg_proc(void*);
 void* _service_connection(void*);
 void _controller_req(slurm_msg_t*);
 void _regist_msg_proc(slurm_msg_t*);
+job_resource *_create_job_resource(char*);
 void _step_complete_msg_proc(slurm_msg_t*);
 void* _job_proc(void*);
 void _print_result(struct timeval*, struct timeval*);
@@ -314,172 +315,77 @@ void _regist_msg_proc(slurm_msg_t *msg)
 	}
 }
 
+job_resource *_create_job_resource(char* jobid_origin_ctrlid)
+{
+	job_resource *a_job_res = init_job_resource();
+
+	/* get the involved controller list in one dimension array*/
+	char *jobid_origin_ctrlid_ctrls = c_calloc(strlen(jobid_origin_ctrlid) + 7);
+	strcat(jobid_origin_ctrlid_ctrls, jobid_origin_ctrlid);
+	strcat(jobid_origin_ctrlid_ctrls, "ctrls");
+	c_zht_lookup(jobid_origin_ctrlid_ctrls, a_job_res->ctrl_ids_1);
+	c_free(jobid_origin_ctrlid_ctrls);
+
+	/* split the one dimension of involved controller list to two dimension */
+	char *ctrl_ids_1_backup = strdup(a_job_res->ctrl_ids_1);
+	a_job_res->num_ctrl = split_str(ctrl_ids_1_backup, ",", a_job_res->ctrl_ids_2);
+
+	/* get the allocated nodelist for each involved controller*/
+	char *jobid_origin_ctrlid_invid = c_calloc(strlen(jobid_origin_ctrlid) + 30 + 2);
+
+	int i = 0;
+	for (; i < a_job_res->num_ctrl; i++)
+	{
+		strcat(jobid_origin_ctrlid_invid, jobid_origin_ctrlid);
+		strcat(jobid_origin_ctrlid_invid, a_job_res->ctrl_ids_2[i]);
+		c_zht_lookup(jobid_origin_ctrlid_invid, a_job_res->node_alloc[i]);
+		c_memset(jobid_origin_ctrlid_invid, strlen(jobid_origin_ctrlid_invid));
+	}
+
+	return a_job_res;
+}
+
 void _step_complete_msg_proc(slurm_msg_t* msg)
 {
 	slurm_send_rc_msg(msg, SLURM_SUCCESS);
 	step_complete_msg_t *complete = (step_complete_msg_t*) msg->data;
-	size_t ln;
-	char str[20] = { 0 };
-	sprintf(str, "%u", complete->job_id);
 
-	char *origin_ctlid = c_calloc(num_byte_per_node);
-	char *jobid_origin_ctlid = c_calloc(num_byte_per_node * 2);
-	char *jobid_origin_ctlid_ctls = c_calloc(num_byte_per_node * 3);
-	int num_lookup_msg_local = 0, num_insert_msg_local = 0,
-			num_comswap_msg_local = 0;
+	/* get the job id */
+	char str_job_id[20] = { 0 };
+	sprintf(str_job_id, "%u", complete->job_id);
 
-	c_zht_lookup(str, origin_ctlid);
+	/* lookup for the origin controller id of this job */
+	char *origin_ctrlid = c_calloc(30);
+	int len = c_zht_lookup(str_job_id, origin_ctrlid);
 
-	strcat(jobid_origin_ctlid, str);
-	strcat(jobid_origin_ctlid, origin_ctlid);
-	strcat(jobid_origin_ctlid_ctls, jobid_origin_ctlid);
-	strcat(jobid_origin_ctlid_ctls, "ctls");
+	/* concat to get the jobid+origin_ctrlid */
+	char *jobid_origin_ctrlid = c_calloc(len + 30 + 2);
+	strcat(jobid_origin_ctrlid, str_job_id);
+	strcat(jobid_origin_ctrlid, origin_ctrlid);
 
-	char *ctl_ids_one = c_calloc(num_controller * num_byte_per_node);
+	/* create the job resource from looking up zht */
+	job_resource *a_job_res = _create_job_resource(jobid_origin_ctrlid);
+	release_res(a_job_res);
+	free_job_resource(a_job_res);
 
-	c_zht_lookup(jobid_origin_ctlid_ctls, ctl_ids_one);
-	c_free(jobid_origin_ctlid_ctls);
-
-	char **ctl_ids = c_malloc_2(num_controller + 1, num_byte_per_node);
-	int num_ctl = split_str(ctl_ids_one, ",", ctl_ids);
-	char *pre_node_ass = c_calloc(partition_size * num_byte_per_node);
-	char *pre_node_ass_copy = c_calloc(partition_size * num_byte_per_node);
-	char *node_ass = c_calloc(partition_size * num_byte_per_node);
-	char *node_ass_copy = c_calloc(partition_size * num_byte_per_node);
-	char *node_ass_new = c_calloc(partition_size * num_byte_per_node);
-	char *jobid_origin_ctlid_selfid = c_calloc(num_byte_per_node * 3);
-
-	num_lookup_msg_local += 2;
-	int flag = 0;
-	char *query_value = c_calloc(partition_size * num_byte_per_node);
-
-	//fprintf(stdout, "The job %u number of controller is %d\n", complete->job_id, num_ctl);
-	//fflush(stdout);
-	int i;
-	for (i = 0; i < num_ctl; i++) {
-		flag = 0;
-		c_memset(query_value, partition_size * num_byte_per_node);
-		c_memset(jobid_origin_ctlid_selfid, num_byte_per_node * 3);
-		c_memset(node_ass_copy, partition_size * num_byte_per_node);
-		c_memset(node_ass, partition_size * num_byte_per_node);
-
-		strcat(jobid_origin_ctlid_selfid, jobid_origin_ctlid);
-		strcat(jobid_origin_ctlid_selfid, ctl_ids[i]);
-
-		c_zht_lookup(jobid_origin_ctlid_selfid, node_ass);
-
-		num_lookup_msg_local++;
-
-		strcpy(node_ass_copy, node_ass);
-
-		int j, k;
-		again: j = k = 0;
-
-		c_memset(pre_node_ass, partition_size * num_byte_per_node);
-		c_memset(node_ass, partition_size * num_byte_per_node);
-		c_memset(pre_node_ass_copy, partition_size * num_byte_per_node);
-		c_memset(node_ass_new, partition_size * num_byte_per_node);
-
-		if (!flag || !strcmp(query_value, "") || query_value == NULL) {
-			c_zht_lookup(ctl_ids[i], pre_node_ass);
-			num_lookup_msg_local++;
-		} else {
-			strcpy(pre_node_ass, query_value);
-		}
-
-		strcpy(pre_node_ass_copy, pre_node_ass);
-		strcpy(node_ass, node_ass_copy);
-
-		j = 0;
-		k = 0;
-
-		char **pre = c_malloc_2(partition_size + 2, num_byte_per_node);
-		if (pre_node_ass != NULL)
-		{
-			j = split_str(pre_node_ass, ",", pre);
-		}
-		else
-		{
-			goto again;
-		}
-		char **add = c_malloc_2(partition_size + 2, num_byte_per_node);
-		k = split_str(node_ass, ",", add);
-
-		char *str_1 = int_to_str(j + k - 1);
-		strcat(node_ass_new, str_1);
-		strcat(node_ass_new, ",");
-		c_free(str_1);
-
-		int idx = 1;
-		for (; idx < j; idx++) {
-			strcat(node_ass_new, pre[idx]);
-			strcat(node_ass_new, ",");
-		}
-		for (idx = 0; idx < k; idx++) {
-			strcat(node_ass_new, add[idx]);
-			if (idx != k - 1) {
-				strcat(node_ass_new, ",");
-			}
-		}
-		/*for (idx = 0; idx < partition_size + 2; idx++)
-		{
-			c_free(pre[idx]);
-			c_free(add[idx]);
-		}*/
-		if (pre != NULL)
-		{
-			free(pre);
-			pre = NULL;
-		}
-		if (add != NULL)
-		{
-			free(add);
-			add = NULL;
-		}
-		num_comswap_msg_local++;
-		//fprintf(stdout, "before free:%s, after free:%s\n", pre_node_ass_copy, node_ass_new);
-		//fflush(stdout);
-		if (c_zht_compare_swap(ctl_ids[i], pre_node_ass_copy, node_ass_new,
-				query_value) != 0) {
-			flag = 1;
-			//fprintf(stdout, "OK, compare and swap failed!\n");
-			//fflush(stdout);
-			goto again;
-		}
-	}
-	/*for (i = 0; i < num_ctl; i++) {
-		c_free(ctl_ids[i]);
-	}
-	if (ctl_ids != NULL)
+	/* check to see whether this job belongs to the controller */
+	if (!strcmp(self_id, origin_ctrlid))
 	{
-		free(ctl_ids);
-		ctl_ids = NULL;
-	}*/
-	c_free(pre_node_ass_copy);
-	c_free(node_ass_copy);
-	c_free(node_ass_new);
-	c_free(jobid_origin_ctlid_selfid);
-	c_free(query_value);
-
-	if (!strcmp(controller_id, origin_ctlid)) {
 		pthread_mutex_lock(&num_job_fin_mutex);
 		num_job_fin++;
-		//fprintf(stdout, "Number of jobs finished is:%d\n", num_job_fin);
-		//fflush(stdout);
 		pthread_mutex_unlock(&num_job_fin_mutex);
-	} else {
-		char *key = c_calloc(3 * num_byte_per_node);
-		strcat(key, jobid_origin_ctlid);
+	}
+	else	// if it is not, then insert a notification message
+	{
+		char *key = c_calloc(strlen(jobid_origin_ctrlid) + 5);
+		strcat(key, jobid_origin_ctrlid);
 		strcat(key, "Fin");
 		c_zht_insert(key, "Finished");
-		num_insert_msg_local++;
-
 		c_free(key);
 	}
-
-	c_free(origin_ctlid);
-	c_free(jobid_origin_ctlid);
-	pthread_mutex_lock(&lookup_msg_mutex);
+	c_free(origin_ctrlid);
+	c_free(jobid_origin_ctrlid);
+	/*pthread_mutex_lock(&lookup_msg_mutex);
 	num_lookup_msg += num_lookup_msg_local;
 	pthread_mutex_unlock(&lookup_msg_mutex);
 	pthread_mutex_lock(&insert_msg_mutex);
@@ -487,7 +393,7 @@ void _step_complete_msg_proc(slurm_msg_t* msg)
 	pthread_mutex_unlock(&insert_msg_mutex);
 	pthread_mutex_lock(&cswap_msg_mutex);
 	num_cswap_msg += num_comswap_msg_local;
-	pthread_mutex_unlock(&cswap_msg_mutex);
+	pthread_mutex_unlock(&cswap_msg_mutex);*/
 }
 
 void *_job_proc(void* data)
@@ -511,7 +417,6 @@ void *_job_proc(void* data)
 	{
 		//dinfo_proc(job_origin_desc_left);
 	};
-	//free(job_desc);
 	pthread_exit(NULL);
 	return NULL;
 }

@@ -15,63 +15,6 @@
 #include <grp.h>
 #include "slurmuse.h";
 
-typedef struct _job_resource
-{
-	int num_try;
-	int num_node;
-	char *nodelist;
-	char *ctrl_ids_1;
-	int num_ctrl;
-	char **ctrl_ids_2;
-	char **node_alloc;
-	int self;
-} job_resource;
-
-job_resource* init_job_resource()
-{
-	job_resource *a_job_res = (job_resource*)malloc(sizeof(job_resource));
-	a_job_res->num_try = 0;
-	a_job_res->num_node = 0;
-	a_job_res->nodelist = c_calloc(30 * part_size);
-	a_job_res->ctrl_ids_1 = c_calloc(30 * num_ctrl);
-	a_job_res->num_ctrl = 0;
-	a_job_res->ctrl_ids_2 = c_calloc_2(num_ctrl, 30);
-	a_job_res->node_alloc = c_calloc_2(num_ctrl, 30 * part_size);
-	a_job_res->self = 1;
-	return a_job_res;
-}
-
-void reset_job_resource(job_resource *a_job_res)
-{
-	if (a_job_res != NULL)
-	{
-		a_job_res->num_try = 0
-		a_job_res->num_node = 0;
-		c_memset(a_job_res->nodelist, 30 * part_size);
-		c_memset(a_job_res->ctrl_ids_1, 30 * num_ctrl);
-		int i = 0;
-		for (; i < num_ctrl; i++)
-		{
-			c_memset(a_job_res->ctrl_ids_2[i], 30);
-			c_memset(a_job_res->node_alloc[i], 30 * part_size);
-		}
-		a_job_res->self = 1;
-	}
-}
-
-void free_job_resource(job_resource *a_job_res)
-{
-	if (a_job_res != NULL)
-	{
-		c_free(a_job_res->nodelist);
-		c_free(a_job_res->ctrl_ids_1);
-		c_free_2(a_job_res->ctrl_ids_2, num_ctrl);
-		c_free_2(a_job_res->node_alloc, num_ctrl);
-		free(a_job_res);
-		a_job_res = NULL;
-	}
-}
-
 int _gen_random_value(int upper_bound)
 {
 	return rand() % upper_bound;
@@ -190,95 +133,6 @@ char *get_ctrl_res(char *ctrl_id)
 	}
 }
 
-void release_res(job_resource *a_job_res)
-{
-	if (a_job_res->num_ctrl > 0)
-	{
-		char *query_value = c_calloc((part_size + 1) * 30);
-		char *node_ass_copy = c_calloc(
-				partition_size * num_byte_per_node);
-		char *pre_node_ass = c_calloc(
-				partition_size * num_byte_per_node);
-		char *pre_node_ass_copy = c_calloc(
-				partition_size * num_byte_per_node);
-		char *node_ass_new = c_calloc(
-				partition_size * num_byte_per_node);
-		char *result = c_calloc((part_size + 1) * 30);
-		for (i = 0; i < a_job_res->num_ctrl; i++)
-		{
-			c_memset(query_value, (part_size + 1) * 30);
-			char *ctrl_pre_res = get_ctrl_res(a_job_res->ctrl_ids_2[i]);
-			char *ctrl_pre_res_backup = strdup(ctrl_pre_res);
-			char *ctrl_add_res_backup = strdup(a_job_res->node_alloc[i]);
-			int j, k;
-			again_1: j = k = 0;
-			c_memset(pre_node_ass, partition_size * num_byte_per_node);
-			c_memset(node_ass_copy, partition_size * num_byte_per_node);
-			c_memset(pre_node_ass_copy,
-					partition_size * num_byte_per_node);
-			c_memset(node_ass_new, partition_size * num_byte_per_node);
-			if (!flag) {
-				c_zht_lookup(ctl_ids[i], pre_node_ass);
-				num_lookup_msg_local++;
-			} else {
-				strcpy(pre_node_ass, query_value);
-			}
-			strcpy(pre_node_ass_copy, pre_node_ass);
-			strcpy(node_ass_copy, node_ass[i]);
-			j = 0;
-			k = 0;
-			char **pre = c_malloc_2(partition_size + 2, num_byte_per_node);
-			j = split_str(pre_node_ass, ",", pre);
-			char **add = c_malloc_2(partition_size + 2, num_byte_per_node);
-			k = split_str(node_ass_copy, ",", add);
-
-			char *str_1 = int_to_str(j + k - 1);
-			strcat(node_ass_new, str_1);
-			strcat(node_ass_new, ",");
-			c_free(str_1);
-			int idx = 1;
-			for (; idx < j; idx++) {
-				strcat(node_ass_new, pre[idx]);
-				strcat(node_ass_new, ",");
-			}
-			for (idx = 0; idx < k; idx++) {
-				strcat(node_ass_new, add[idx]);
-				if (idx != k - 1) {
-					strcat(node_ass_new, ",");
-				}
-			}
-			/*for (idx = 0; idx < partition_size + 2; idx++) {
-				c_free(pre[idx]);
-				c_free(add[idx]);
-			}*/
-			if (pre != NULL)
-			{
-				free(pre);
-				pre = NULL;
-			}
-			if (add != NULL)
-			{
-				free(add);
-				add = NULL;
-			}
-			num_comswap_msg_local++;
-			if (c_zht_compare_swap(ctl_ids[i], pre_node_ass_copy,
-					node_ass_new, query_value) != 0) {
-				flag = 1;
-				goto again_1;
-			}
-		}
-		c_free(node_ass_copy);
-		c_free(pre_node_ass);
-		c_free(pre_node_ass_copy);
-		c_free(node_ass_new);
-		//sleep(poll_interval);
-		flag = 0;
-		goto again;
-
-	reset_job_resource(a_job_res);
-}
-
 void update_job_resource(
 						    job_resource *a_job_res,
 						    int num_node_allocated,
@@ -327,7 +181,7 @@ int do_allocate(
 		int num_node_attempt = num_node > num_more_node ? num_more_node : num_node;
 		int len = strlen(p[0]);
 		(*p) += len;
-		char *nodelist = _allocate_node(ctrl_id, ctrl_res, p,
+		char *nodelist = _allocate_node(ctrl_id, ctrl_res_copy, p,
 					num_node_attempt, num_node, query_value);
 		if (nodelist == NULL)
 		{
@@ -371,6 +225,8 @@ void allocate_one_res(char *ctrl_id, job_resource *a_job_res, int num_more_node)
 
 job_resource *allocate_res(int num_node_required)
 {
+	unsigned int iseed = (unsigned int) time(NULL);
+	srand(iseed);
 	job_resource *a_job_res = init_job_resource();
 	char *ctrl_id = self_id;
 	while (a_job_res->num_node < num_node_required)
@@ -379,393 +235,52 @@ job_resource *allocate_res(int num_node_required)
 		if (a_job_res->num_try > 3)
 		{
 			release_res(a_job_res);
+			reset_job_resource(a_job_res);
 		}
 		ctrl_id = mem_list[_gen_random_value(num_ctrl)];
 	}
 	return a_job_res;
 }
 
-
-void _create_srun_job(srun_job_t **p_job, env_t *env,
-						slurm_step_launch_callbacks_t *step_callbacks,
-						struct srun_options *opt_1)
+void insert_jobinfo_zht(uint32_t job_id, job_resource *a_job_res)
 {
-	unsigned int iseed = (unsigned int) time(NULL);
-	srand(iseed);
-	srun_job_t *job = NULL;
-	uint32_t job_id = 0;
+	/* insert (job_id, origin_ctrl_id) */
+	char str_job_id[20] = { 0 };
+	sprintf(str_job_id, "%u", job_id);
+	c_zht_insert(str_job_id, self_id);
 
-	char *node_list_count = c_calloc(partition_size * num_byte_per_node);
-	char *node_list_count_copy = c_calloc(partition_size * num_byte_per_node);
-	char *job_node_list = c_calloc(partition_size * num_byte_per_node);
-
-	char *jobid_origin_ctlid = c_calloc(2 * num_byte_per_node);
-	char *jobid_origin_ctlid_ctls = c_calloc(3 * num_byte_per_node);
-
-	char *jobid_origin_ctlid_selfid = c_calloc(3 * num_byte_per_node);
-
-	char *ctl_ids_one = c_calloc(num_controller * num_byte_per_node);
-	char **ctl_ids = c_malloc_2(num_controller, num_byte_per_node);
-	char **node_ass = c_malloc_2(num_controller,
-			partition_size * num_byte_per_node);
-
-	int *ctl_sel = (int*) calloc(num_controller, sizeof(int));
-
-	size_t ln;
-	int i = 0, num_ctl = 0, num_node_allocate = 0;
-	int self = 0, poll_interval = 1;
-
-	int num_insert_msg_local = 0, num_lookup_msg_local = 0,
-			num_comswap_msg_local = 0;
-
-	int flag = 0;
-	char* query_value = c_calloc(partition_size * num_byte_per_node);
-
-	again: for (i = 0; i < num_controller; i++) {
-		ctl_sel[i] = -1;
-	}
-
-	ln = 0;
-	num_ctl = 0;
-	num_node_allocate = 0;
-	self = 0;
-	poll_interval = 0;
-
-	c_memset(node_list_count, partition_size * num_byte_per_node);
-	c_memset(node_list_count_copy, partition_size * num_byte_per_node);
-	c_memset(job_node_list, partition_size * num_byte_per_node);
-	c_memset(ctl_ids_one, num_controller * num_byte_per_node);
-
-	for (i = 0; i < num_controller; i++) {
-		c_memset(ctl_ids[i], num_byte_per_node);
-		c_memset(node_ass[i], partition_size * num_byte_per_node);
-	}
-
-	if (!flag || query_value == NULL || !strcmp(query_value, "")) {
-		pthread_mutex_lock(&ratio_lookup_msg_mutex);
-		ratio_lookup++;
-		pthread_mutex_unlock(&ratio_lookup_msg_mutex);
-		c_zht_lookup(controller_id, node_list_count);
-		num_lookup_msg_local++;
-	} else {
-		strcpy(node_list_count, query_value);
-	}
-
-	strcpy(node_list_count_copy, node_list_count);
-
-	char *tmp_ptr = NULL;
-
-	if (node_list_count != NULL && strcmp(node_list_count, "")) {
-		char *num_node = strtok_r(node_list_count, ",", &tmp_ptr);
-		int _num_node = str_to_int(num_node);
-		if (_num_node > 0) {
-			num_node_allocate =
-					_num_node > opt_1->min_nodes ? opt_1->min_nodes : _num_node;
-			if (num_node_allocate < opt_1->min_nodes && num_controller == 1) {
-				if (partition_size < opt_1->min_nodes) {
-					pthread_mutex_lock(&num_job_fail_mutex);
-					num_job_fail++;
-					pthread_mutex_unlock(&num_job_fail_mutex);
-					c_free(node_list_count);
-					c_free(node_list_count_copy);
-					c_free(job_node_list);
-					c_free(jobid_origin_ctlid);
-					c_free(jobid_origin_ctlid_selfid);
-					/*for (i = 0; i < num_controller; i++)
-					{
-						c_free(node_ass[i]);
-						c_free(ctl_ids[i]);
-					}*/
-					if (node_ass != NULL)
-					{
-						free(node_ass);
-						node_ass = NULL;
-					}
-					if (ctl_ids != NULL)
-					{
-						free(ctl_ids);
-						ctl_ids = NULL;
-					}
-					pthread_exit(NULL);
-				} else {
-					flag = 0;
-					usleep(100000);
-					goto again;
-				}
-			}
-			char *p[100];
-			i = 0;
-			p[i] = strtok_r(NULL, ",", &tmp_ptr);
-			while (p[i] != NULL) {
-				i++;
-				p[i] = strtok_r(NULL, ",", &tmp_ptr);
-			}
-			char* tmp_char = _allocate_node(controller_id, node_list_count_copy,
-					p, num_node_allocate, _num_node, query_value);
-			num_comswap_msg_local++;
-			if (tmp_char) {
-				strcat(job_node_list, tmp_char);
-				strcat(ctl_ids_one, controller_id);
-				strcat(ctl_ids_one, ",");
-				strcat(ctl_ids[num_ctl], controller_id);
-				strcat(node_ass[num_ctl], tmp_char);
-				strcat(node_ass[num_ctl], ",");
-				int idx = _get_index(controller_id);
-				ctl_sel[idx] = num_ctl;
-				num_ctl++;
-				self = 1;
-			} else {
-				flag = 1;
-				goto again;
-			}
-		} else if (num_controller == 1) {
-			usleep(100000);
-			flag = 0;
-			goto again;
-		}
-	} else {
-		flag = 0;
-		usleep(100000);
-		goto again;
-	}
-
-	c_memset(query_value, partition_size * num_byte_per_node);
-
-	int controller_id_selected = -1;
-
-	char* controller_id_remote = c_calloc(num_byte_per_node);
-	char* node_list_count_remote = c_calloc(partition_size * num_byte_per_node);
-	char* node_list_count_remote_copy = c_calloc(
-			partition_size * num_byte_per_node);
-	int num_node_allocate_remote = 0;
-	char *tmp_ptr_1 = NULL;
-	//char *remote_nodelist = c_calloc(100 * 100);
-	while (num_node_allocate < opt_1->min_nodes) {
-		//memset(remote_nodelist, '\0', 100 * 100);
-		c_memset(controller_id_remote, num_byte_per_node);
-		c_memset(node_list_count_remote, partition_size * num_byte_per_node);
-		c_memset(node_list_count_remote_copy,
-				partition_size * num_byte_per_node);
-		//memset(remote_nodelist, '\0', 100 * 100);
-		controller_id_selected = _gen_random_value(num_controller);
-		strcpy(controller_id_remote, mem_list_file[controller_id_selected]);
-		again_2: c_memset(node_list_count_remote,
-				partition_size * num_byte_per_node);
-		c_memset(node_list_count_remote_copy,
-				partition_size * num_byte_per_node);
-		c_zht_lookup(controller_id_remote, node_list_count_remote);
-		num_lookup_msg_local++;
-		if (node_list_count_remote == NULL) {
-			usleep(100000);
-			continue;
-		}
-		strcpy(node_list_count_remote_copy, node_list_count_remote);
-		char* num_node = strtok_r(node_list_count_remote, ",", &tmp_ptr);
-		int _num_node = str_to_int(num_node);
-		if (_num_node > 0) {
-			poll_interval = 0;
-			num_node_allocate_remote =
-					_num_node >= (opt_1->min_nodes - num_node_allocate) ?
-							(opt_1->min_nodes - num_node_allocate) : _num_node;
-			char *q[100];
-			i = 0;
-			q[i] = strtok_r(NULL, ",", &tmp_ptr);
-			while (q[i] != NULL) {
-				i++;
-				q[i] = strtok_r(NULL, ",", &tmp_ptr);
-			}
-			char *remote_nodelist = _allocate_node(controller_id_remote,
-					node_list_count_remote_copy, q, num_node_allocate_remote,
-					_num_node, query_value);
-			num_comswap_msg_local++;
-			if (remote_nodelist != NULL) {
-				if (num_ctl > 0)
-				{
-					strcat(job_node_list, ",");
-				}
-				strcat(job_node_list, remote_nodelist);
-				num_node_allocate += num_node_allocate_remote;
-				if (ctl_sel[controller_id_selected] == -1) {
-					strcat(ctl_ids_one, controller_id_remote);
-					strcat(ctl_ids_one, ",");
-					strcat(ctl_ids[num_ctl], controller_id_remote);
-					strcat(node_ass[num_ctl], remote_nodelist);
-					strcat(node_ass[num_ctl], ",");
-					ctl_sel[controller_id_selected] = num_ctl;
-					num_ctl++;
-				} else {
-					strcat(node_ass[ctl_sel[controller_id_selected]],
-							remote_nodelist);
-					strcat(node_ass[ctl_sel[controller_id_selected]], ",");
-				}
-				int idx = _get_index(controller_id);
-				if (controller_id_selected < idx) {
-					self = 0;
-				}
-				c_free(remote_nodelist);
-			} else {
-				goto again_2;
-			}
-		} else {
-			usleep(100000);
-			//fprintf(stdout, "OK, I didn't get resource!\n");
-			//fflush(stdout);
-			poll_interval++;
-			if (poll_interval > 2) {
-				if (num_ctl > 0)
-				{
-					//fprintf(stdout, "OK, I need to release resource!\n");
-					//fflush(stdout);
-					char *node_ass_copy = c_calloc(
-							partition_size * num_byte_per_node);
-					char *pre_node_ass = c_calloc(
-							partition_size * num_byte_per_node);
-					char *pre_node_ass_copy = c_calloc(
-							partition_size * num_byte_per_node);
-					char *node_ass_new = c_calloc(
-							partition_size * num_byte_per_node);
-					for (i = 0; i < num_ctl; i++) {
-						flag = 0;
-						c_memset(query_value, partition_size * num_byte_per_node);
-						int j, k;
-						again_1: j = k = 0;
-						c_memset(pre_node_ass, partition_size * num_byte_per_node);
-						c_memset(node_ass_copy, partition_size * num_byte_per_node);
-						c_memset(pre_node_ass_copy,
-								partition_size * num_byte_per_node);
-						c_memset(node_ass_new, partition_size * num_byte_per_node);
-						if (!flag) {
-							c_zht_lookup(ctl_ids[i], pre_node_ass);
-							num_lookup_msg_local++;
-						} else {
-							strcpy(pre_node_ass, query_value);
-						}
-						strcpy(pre_node_ass_copy, pre_node_ass);
-						strcpy(node_ass_copy, node_ass[i]);
-						j = 0;
-						k = 0;
-						char **pre = c_malloc_2(partition_size + 2, num_byte_per_node);
-						j = split_str(pre_node_ass, ",", pre);
-						char **add = c_malloc_2(partition_size + 2, num_byte_per_node);
-						k = split_str(node_ass_copy, ",", add);
-
-						char *str_1 = int_to_str(j + k - 1);
-						strcat(node_ass_new, str_1);
-						strcat(node_ass_new, ",");
-						c_free(str_1);
-						int idx = 1;
-						for (; idx < j; idx++) {
-							strcat(node_ass_new, pre[idx]);
-							strcat(node_ass_new, ",");
-						}
-						for (idx = 0; idx < k; idx++) {
-							strcat(node_ass_new, add[idx]);
-							if (idx != k - 1) {
-								strcat(node_ass_new, ",");
-							}
-						}
-						/*for (idx = 0; idx < partition_size + 2; idx++) {
-							c_free(pre[idx]);
-							c_free(add[idx]);
-						}*/
-						if (pre != NULL)
-						{
-							free(pre);
-							pre = NULL;
-						}
-						if (add != NULL)
-						{
-							free(add);
-							add = NULL;
-						}
-						num_comswap_msg_local++;
-						if (c_zht_compare_swap(ctl_ids[i], pre_node_ass_copy,
-								node_ass_new, query_value) != 0) {
-							flag = 1;
-							goto again_1;
-						}
-					}
-					c_free(node_ass_copy);
-					c_free(pre_node_ass);
-					c_free(pre_node_ass_copy);
-					c_free(node_ass_new);
-					//sleep(poll_interval);
-					flag = 0;
-					goto again;
-				}
-			}
-		}
-	}
-
-	opt_1->nodelist = c_calloc(partition_size * num_byte_per_node);
-	strcpy(opt_1->nodelist, job_node_list);
-	if (!opt_1->nodelist) {
-		goto again;
-	}
-
-
-
-	job = _job_create_1(opt_1);
-	create_job_step_1(job, false, opt_1);
-	if (_become_user(opt_1) < 0)
-		info("Warning: Unable to assume uid=%u", opt_1->uid);
-	//_shepard_spawn(job, false);
-	*p_job = job;
-	job_id = job->jobid;
-
-	//fprintf(stdout, "The job %u node list is:%s\n", job->jobid, job->nodelist);
-	//fflush(stdout);
-	c_free(node_list_count);
-	c_free(node_list_count_copy);
-	c_free(controller_id_remote);
-	c_free(node_list_count_remote);
-	c_free(node_list_count_remote_copy); //free(remote_nodelist);
-
-	char str[20] = { 0 };
-	sprintf(str, "%u", job_id);
-	c_zht_insert(str, controller_id);
-	num_insert_msg_local++;
-	strcat(jobid_origin_ctlid, str);
-	strcat(jobid_origin_ctlid, controller_id);
-	//c_zht_insert2(jobid_origin_ctlid, "this is a job");
-	strcat(jobid_origin_ctlid_ctls, jobid_origin_ctlid);
-	strcat(jobid_origin_ctlid_ctls, "ctls");
-	c_zht_insert(jobid_origin_ctlid_ctls, ctl_ids_one);
-	num_insert_msg_local++;
-	if (self) {
-		c_zht_insert(jobid_origin_ctlid, "I am here");
-		num_insert_msg_local++;
-	}
-
-	for (i = 0; i < num_ctl; i++) {
-		c_memset(jobid_origin_ctlid_selfid, 3 * num_byte_per_node);
-		strcat(jobid_origin_ctlid_selfid, jobid_origin_ctlid);
-		strcat(jobid_origin_ctlid_selfid, ctl_ids[i]);
-		c_zht_insert(jobid_origin_ctlid_selfid, node_ass[i]);
-		num_insert_msg_local++;
-	}
-	c_free(job_node_list);
-	c_free(jobid_origin_ctlid);
-	c_free(jobid_origin_ctlid_selfid);
-	c_free(jobid_origin_ctlid_ctls);
-	c_free(ctl_ids_one);
-	/*for (i = 0; i < num_controller; i++) {
-		c_free(ctl_ids[i]);
-		c_free(node_ass[i]);
-	}*/
-	if (ctl_ids != NULL)
+	/* insert (job_id + origin_ctrl_id + "ctrls", involved controllers),
+	 * if this job will be returned to the original  controller, then
+	 * insert (job_id + origin_ctrl_id, "I am here")*/
+	char *jobid_origin_ctrlid = c_calloc(strlen(str_job_id) + strlen(self_id) + 2);
+	strcat(jobid_origin_ctrlid, job_id);
+	strcat(jobid_origin_ctrlid, self_id);
+	if (a_job_res->self)
 	{
-		free(ctl_ids);
-		ctl_ids = NULL;
+		c_zht_insert(jobid_origin_ctrlid, "I am here");
 	}
-	if (node_ass != NULL)
+
+	char *jobid_origin_ctrlid_ctrls = c_calloc(strlen(jobid_origin_ctrlid) + 7);
+	strcat(jobid_origin_ctrlid_ctrls, jobid_origin_ctrlid);
+	strcat(jobid_origin_ctrlid_ctrls, "ctrls");
+	c_zht_insert(jobid_origin_ctrlid_ctrls, a_job_res->ctrl_ids_1);
+
+	/* for each involved controller, insert (job_id + origin_ctrl_id +
+	 * involved_ctrl_id, involved nodelist)*/
+	int i = 0;
+	char *jobid_origin_ctrlid_invid = c_calloc(strlen(jobid_origin_ctrlid) + 30 + 2);
+	for (; i < a_job_res->num_ctrl; i++)
 	{
-		free(node_ass);
-		node_ass = NULL;
+		strcat(jobid_origin_ctrlid_invid, jobid_origin_ctrlid);
+		strcat(jobid_origin_ctrlid_invid, a_job_res->ctrl_ids_2[i]);
+		c_zht_insert(jobid_origin_ctrlid_invid, a_job_res->node_alloc[i]);
+		c_memset(jobid_origin_ctrlid_invid, strlen(jobid_origin_ctrlid_invid));
 	}
-	free(ctl_sel);
-	c_free(query_value);
-	pthread_mutex_lock(&lookup_msg_mutex);
+	c_free(jobid_origin_ctrlid);
+	c_free(jobid_origin_ctrlid_ctrls);
+	c_free(jobid_origin_ctrlid_invid);
+	free_job_resource(a_job_res);
+	/*pthread_mutex_lock(&lookup_msg_mutex);
 	num_lookup_msg += num_lookup_msg_local;
 	pthread_mutex_unlock(&lookup_msg_mutex);
 	pthread_mutex_lock(&insert_msg_mutex);
@@ -773,14 +288,45 @@ void _create_srun_job(srun_job_t **p_job, env_t *env,
 	pthread_mutex_unlock(&insert_msg_mutex);
 	pthread_mutex_lock(&comswap_msg_mutex);
 	num_comswap_msg += num_comswap_msg_local;
-	pthread_mutex_unlock(&comswap_msg_mutex);
+	pthread_mutex_unlock(&comswap_msg_mutex);*/
 }
 
-int _slurm_debug_env_val(void) {
+void _create_srun_job(srun_job_t **p_job, env_t *env,
+						slurm_step_launch_callbacks_t *step_callbacks,
+						struct srun_options *opt_1)
+{
+
+	srun_job_t *job = NULL;
+	uint32_t job_id = 0;
+
+	if (part_size * num_ctrl < opt_1->min_nodes)
+	{
+		pthread_mutex_lock(&num_job_fail_mutex);
+		num_job_fail++;
+		pthread_mutex_unlock(&num_job_fail_mutex);
+		pthread_exit(NULL);
+	}
+	else
+	{
+		job_resource *a_job_res = allocate_res(opt_1->min_nodes);
+		opt_1->nodelist = strdup(a_job_res->nodelist);
+		job = _job_create_1(opt_1);
+		create_job_step_1(job, false, opt_1);
+		if (_become_user(opt_1) < 0)
+			info("Warning: Unable to assume uid=%u", opt_1->uid);
+		*p_job = job;
+		insert_jobinfo_zht(job->jobid, a_job_res);
+		/* to be continued with zht message statistics */
+	}
+}
+
+int _slurm_debug_env_val(void)
+{
 	long int level = 0;
 	const char *val;
 
-	if ((val = getenv("SLURM_DEBUG"))) {
+	if ((val = getenv("SLURM_DEBUG")))
+	{
 		char *p;
 		if ((level = strtol(val, &p, 10)) < -LOG_LEVEL_INFO)
 			level = -LOG_LEVEL_INFO;
@@ -790,11 +336,13 @@ int _slurm_debug_env_val(void) {
 	return ((int) level);
 }
 
-void _set_exit_code(void) {
+void _set_exit_code(void)
+{
 	int i;
 	char *val;
 
-	if ((val = getenv("SLURM_EXIT_ERROR"))) {
+	if ((val = getenv("SLURM_EXIT_ERROR")))
+	{
 		i = atoi(val);
 		if (i == 0)
 			error("SLURM_EXIT_ERROR has zero value");
@@ -802,7 +350,8 @@ void _set_exit_code(void) {
 			error_exit = i;
 	}
 
-	if ((val = getenv("SLURM_EXIT_IMMEDIATE"))) {
+	if ((val = getenv("SLURM_EXIT_IMMEDIATE")))
+	{
 		i = atoi(val);
 		if (i == 0)
 			error("SLURM_EXIT_IMMEDIATE has zero value");
@@ -811,7 +360,8 @@ void _set_exit_code(void) {
 	}
 }
 
-int _set_rlimit_env(struct srun_options *opt_1) {
+int _set_rlimit_env(struct srun_options *opt_1)
+{
 	int rc = SLURM_SUCCESS;
 	struct rlimit rlim[1];
 	unsigned long cur;
@@ -819,18 +369,19 @@ int _set_rlimit_env(struct srun_options *opt_1) {
 	slurm_rlimits_info_t *rli;
 
 	/* Modify limits with any command-line options */
-	if (opt_1->propagate
-			&& parse_rlimits(opt_1->propagate, PROPAGATE_RLIMITS)) {
+	if (opt_1->propagate && parse_rlimits(opt_1->propagate, PROPAGATE_RLIMITS))
+	{
 		error("--propagate=%s is not valid.", opt_1->propagate);
 		exit(error_exit);
 	}
 
-	for (rli = get_slurm_rlimits_info(); rli->name != NULL; rli++) {
-
+	for (rli = get_slurm_rlimits_info(); rli->name != NULL; rli++)
+	{
 		if (rli->propagate_flag != PROPAGATE_RLIMITS)
 			continue;
 
-		if (getrlimit(rli->resource, rlim) < 0) {
+		if (getrlimit(rli->resource, rlim) < 0)
+		{
 			error("getrlimit (RLIMIT_%s): %m", rli->name);
 			rc = SLURM_FAILURE;
 			continue;
@@ -846,7 +397,8 @@ int _set_rlimit_env(struct srun_options *opt_1) {
 		else
 			format = "%lu";
 
-		if (setenvf(NULL, name, format, cur) < 0) {
+		if (setenvf(NULL, name, format, cur) < 0)
+		{
 			error("unable to set %s in environment", name);
 			rc = SLURM_FAILURE;
 			continue;
@@ -861,7 +413,8 @@ int _set_rlimit_env(struct srun_options *opt_1) {
 	if (getrlimit(RLIMIT_NOFILE, rlim) < 0)
 		return (error("getrlimit (RLIMIT_NOFILE): %m"));
 
-	if (rlim->rlim_cur < rlim->rlim_max) {
+	if (rlim->rlim_cur < rlim->rlim_max)
+	{
 		rlim->rlim_cur = rlim->rlim_max;
 		if (setrlimit(RLIMIT_NOFILE, rlim) < 0)
 			return (error("Unable to increase max no. files: %m"));
@@ -870,19 +423,23 @@ int _set_rlimit_env(struct srun_options *opt_1) {
 	return rc;
 }
 
-void _set_prio_process_env(void) {
+void _set_prio_process_env(void)
+{
 	int retval;
 
 	errno = 0; /* needed to detect a real failure since prio can be -1 */
 
-	if ((retval = getpriority(PRIO_PROCESS, 0)) == -1) {
-		if (errno) {
+	if ((retval = getpriority(PRIO_PROCESS, 0)) == -1)
+	{
+		if (errno)
+		{
 			error("getpriority(PRIO_PROCESS): %m");
 			return;
 		}
 	}
 
-	if (setenvf(NULL, "SLURM_PRIO_PROCESS", "%d", retval) < 0) {
+	if (setenvf(NULL, "SLURM_PRIO_PROCESS", "%d", retval) < 0)
+	{
 		error("unable to set SLURM_PRIO_PROCESS in environment");
 		return;
 	}
@@ -890,8 +447,11 @@ void _set_prio_process_env(void) {
 	debug("propagating SLURM_PRIO_PROCESS=%d", retval);
 }
 
-int _set_umask_env(struct srun_options *opt_1) {
-	if (!getenv("SRUN_DEBUG")) { /* do not change current value */
+int _set_umask_env(struct srun_options *opt_1)
+{
+	if (!getenv("SRUN_DEBUG"))
+	{
+		/* do not change current value */
 		/* NOTE: Default debug level is 3 (info) */
 		int log_level = LOG_LEVEL_INFO + _verbose - opt_1->quiet;
 
@@ -899,16 +459,18 @@ int _set_umask_env(struct srun_options *opt_1) {
 			error("unable to set SRUN_DEBUG in environment");
 	}
 
-	if (!getenv("SLURM_UMASK")) { /* do not change current value */
+	if (!getenv("SLURM_UMASK"))
+	{
+		/* do not change current value */
 		char mask_char[5];
 		mode_t mask;
 
 		mask = (int) umask(0);
 		umask(mask);
 
-		sprintf(mask_char, "0%d%d%d", ((mask >> 6) & 07), ((mask >> 3) & 07),
-				mask & 07);
-		if (setenvf(NULL, "SLURM_UMASK", "%s", mask_char) < 0) {
+		sprintf(mask_char, "0%d%d%d", ((mask >> 6) & 07), ((mask >> 3) & 07), mask & 07);
+		if (setenvf(NULL, "SLURM_UMASK", "%s", mask_char) < 0)
+		{
 			error("unable to set SLURM_UMASK in environment");
 			return SLURM_FAILURE;
 		}
@@ -918,15 +480,18 @@ int _set_umask_env(struct srun_options *opt_1) {
 	return SLURM_SUCCESS;
 }
 
-void _set_submit_dir_env(void) {
+void _set_submit_dir_env(void)
+{
 	char buf[MAXPATHLEN + 1];
 
-	if ((getcwd(buf, MAXPATHLEN)) == NULL) {
+	if ((getcwd(buf, MAXPATHLEN)) == NULL)
+	{
 		error("getcwd failed: %m");
 		exit(error_exit);
 	}
 
-	if (setenvf(NULL, "SLURM_SUBMIT_DIR", "%s", buf) < 0) {
+	if (setenvf(NULL, "SLURM_SUBMIT_DIR", "%s", buf) < 0)
+	{
 		error("unable to set SLURM_SUBMIT_DIR in environment");
 		return;
 	}
@@ -938,18 +503,13 @@ void check_job_belong(srun_job_t *job)
 	char str[20] = { 0 }; sprintf(str, "%u", job->jobid);
 	char *key = c_calloc(100);
 	strcpy(key, str); strcat(key, self_id);
-	size_t ln;
-	int num_lookup_msg_local = 0;
 	c_zht_lookup(key, exist);
-	num_lookup_msg_local++;
-	int num_callback_msg_local = 0;
 	if (strcmp(exist, "I am here"))
 	{
 		strcat(key, "Fin");
 		char *fin = c_calloc(10);
 		//c_state_change_callback(key, "Finished");
 		c_zht_lookup(key, fin);
-		num_lookup_msg_local++;
 		while (1)
 		{
 			if (!strcmp(fin, "Finished") || num_job_fin + num_job_fail >= num_job)
@@ -962,11 +522,9 @@ void check_job_belong(srun_job_t *job)
 				usleep(100000);
 				c_memset(fin, 10);
 				c_zht_lookup(key, fin);
-				num_lookup_msg_local++;
 			}
 		}
 		if (num_job_fin + num_job_fail < num_job)
-		//num_callback_lookup_msg_local++;
 		{
 			pthread_mutex_lock(&num_job_fin_mutex);
 			num_job_fin++;
@@ -975,15 +533,6 @@ void check_job_belong(srun_job_t *job)
 	}
 	c_free(exist);
 	c_free(key);
-	pthread_mutex_lock(&lookup_msg_mutex);
-	num_lookup_msg += num_lookup_msg_local;
-	pthread_mutex_unlock(&lookup_msg_mutex);
-	if (!num_callback_msg_local)
-	{
-		pthread_mutex_lock(&callback_msg_mutex);
-		num_callback_msg += num_callback_msg_local;
-		pthread_mutex_unlock(&callback_msg_mutex);
-	}
 }
 
 extern void drun_proc(int count, char **job_char_desc)

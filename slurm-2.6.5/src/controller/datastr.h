@@ -51,9 +51,26 @@ typedef struct _queue
 	int queue_length;
 } queue;
 
+typedef struct _job_resource
+{
+	int num_try;
+	int num_node;
+	char *nodelist;
+	char *ctrl_ids_1;
+	int num_ctrl;
+	char **ctrl_ids_2;
+	char **node_alloc;
+	int self;
+} job_resource;
+
 extern queue* init_queue();
 extern void append_queue(queue*, char*);
 extern queue_item* del_first_queue(queue*);
+
+extern job_resource* init_job_resource();
+extern void reset_job_resource(job_resource*);
+extern void free_job_resource(job_resource*);
+extern void release_res(job_resource*);
 
 extern char* _allocate_node(char*, char*, char**, int, int, char*);
 
