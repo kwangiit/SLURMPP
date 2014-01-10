@@ -182,7 +182,7 @@ extern char* _allocate_node(
 	strcat(new_value, ",");
 	for (i = 0; i < num_node_allocate; i++)
 	{
-		strcat(nodelist, seen_value_array[i]);
+		strcat(nodelist, seen_value_array[i + 1]);
 		if (i != num_node_allocate - 1)
 		{
 			strcat(nodelist, ",");
@@ -190,7 +190,7 @@ extern char* _allocate_node(
 	}
 	for (i = 0; i < num_node_left; i++)
 	{
-		strcat(new_value, seen_value_array[i + num_node_allocate]);
+		strcat(new_value, seen_value_array[i + num_node_allocate + 1]);
 		if (i != num_node_left - 1)
 		{
 			strcat(new_value, ",");
@@ -343,20 +343,41 @@ extern int find_exist(char **source, char *target, int size)
 	int count = 0;
 	char* tmp = source[count];
 
+	if (tmp == NULL || !strcmp(tmp, "") || !strcmp(tmp, "\0"))
+	{
+		return -1;
+	}
+
 	while (tmp != NULL && strcmp(tmp, "") && strcmp(tmp, "\0"))
 	{
 		if (!strcmp(tmp, target))
 		{
-			return count;
+			break;
 		}
 		count++;
 		if (count >= size)
 		{
-			return -1;
+			count = -1;
+			break;
 		}
 		tmp = source[count];
 	}
-	return -1;
+	return count;
+}
+
+extern char *get_ctrl_res(char *ctrl_id)
+{
+	char *ctrl_res = c_calloc((part_size + 1) * 30);
+	int len = c_zht_lookup(ctrl_id, ctrl_res);
+	if (len != 0)
+	{
+		c_free(ctrl_res);
+		return NULL;
+	}
+	else
+	{
+		return ctrl_res;
+	}
 }
 
 long long timeval_diff(struct timeval *difference, struct timeval *end_time,

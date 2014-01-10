@@ -91,7 +91,7 @@ int main(int argc, char *argv[])
 
 	/* sleep for some time to ensure that all the other
 	 * controllers also finished registration */
-	sleep(30);
+	//sleep(30);
 
 	/* start to launch jobs */
 	gettimeofday(&start, 0x0); // get the starting time stamp
@@ -287,7 +287,7 @@ void _regist_msg_proc(slurm_msg_t *msg)
 	pthread_mutex_lock(&regist_mutex);
 	char* target = ((slurm_node_registration_status_msg_t *) msg->data)->node_name;
 
-	if (find_exist(source, target, part_size) >= 0)
+	if (find_exist(source, target, part_size) < 0)
 	{
 		strcpy(source[num_regist_recv++], target);
 		strcat(resource,target);
@@ -356,10 +356,10 @@ void _step_complete_msg_proc(slurm_msg_t* msg)
 
 	/* lookup for the origin controller id of this job */
 	char *origin_ctrlid = c_calloc(30);
-	int len = c_zht_lookup(str_job_id, origin_ctrlid);
+	c_zht_lookup(str_job_id, origin_ctrlid);
 
 	/* concat to get the jobid+origin_ctrlid */
-	char *jobid_origin_ctrlid = c_calloc(len + 30 + 2);
+	char *jobid_origin_ctrlid = c_calloc(strlen(origin_ctrlid) + 30 + 2);
 	strcat(jobid_origin_ctrlid, str_job_id);
 	strcat(jobid_origin_ctrlid, origin_ctrlid);
 
@@ -400,6 +400,7 @@ void *_job_proc(void* data)
 {
 	queue_item *job = (queue_item*) data;
 	char **job_desc = c_calloc_2(10, 30);
+
 	int count = split_str(job->job_description, " ", job_desc);
 	if (count == 0)
 	{

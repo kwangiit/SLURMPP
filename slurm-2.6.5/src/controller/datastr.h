@@ -85,5 +85,6 @@ extern int split_str(char*, char*, char**);
 extern void merge_res_str(char*, char*, char*);
 extern int get_size(char**);
 extern int find_exist(char**, char*, int);
+extern char* get_ctrl_res(char*);
 extern long long timeval_diff(struct timeval*, struct timeval*, struct timeval*);
 #endif /* DATASTR_H_ */

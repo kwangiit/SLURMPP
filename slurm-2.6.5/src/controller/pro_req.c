@@ -118,20 +118,7 @@ int _get_index(char *ctl_id)
 	return i;
 }
 
-char *get_ctrl_res(char *ctrl_id)
-{
-	char *ctrl_res = c_calloc((part_size + 1) * 30);
-	int len = c_zht_lookup(ctrl_id, ctrl_res);
-	if (len == 0)
-	{
-		c_free(ctrl_res);
-		return NULL;
-	}
-	else
-	{
-		return ctrl_res;
-	}
-}
+
 
 void update_job_resource(
 						    job_resource *a_job_res,
@@ -174,13 +161,13 @@ int do_allocate(
 {
 	char *ctrl_res_copy = strdup(ctrl_res);
 	char *p[part_size + 1];
-	split_str(ctrl_res, ",", p);
+	int count = split_str(ctrl_res, ",", p);
 	int num_node = str_to_int(p[0]);
 	if (num_node > 0)
 	{
 		int num_node_attempt = num_node > num_more_node ? num_more_node : num_node;
-		int len = strlen(p[0]);
-		(*p) += len;
+		//int len = strlen(p[0]);
+		//(*p) += len;
 		char *nodelist = _allocate_node(ctrl_id, ctrl_res_copy, p,
 					num_node_attempt, num_node, query_value);
 		if (nodelist == NULL)
@@ -212,7 +199,8 @@ void allocate_one_res(char *ctrl_id, job_resource *a_job_res, int num_more_node)
 		int ret = do_allocate(ctrl_id, ctrl_res, a_job_res, query_value, num_more_node);
 		while (ret == 0)
 		{
-			strcat(ctrl_res, query_value);
+			c_memset(ctrl_res, strlen(ctrl_res));
+			strcpy(ctrl_res, query_value);
 			ret = do_allocate(ctrl_id, ctrl_res, a_job_res, query_value, num_more_node);
 		}
 		if (ret < 0)
@@ -253,7 +241,7 @@ void insert_jobinfo_zht(uint32_t job_id, job_resource *a_job_res)
 	 * if this job will be returned to the original  controller, then
 	 * insert (job_id + origin_ctrl_id, "I am here")*/
 	char *jobid_origin_ctrlid = c_calloc(strlen(str_job_id) + strlen(self_id) + 2);
-	strcat(jobid_origin_ctrlid, job_id);
+	strcat(jobid_origin_ctrlid, str_job_id);
 	strcat(jobid_origin_ctrlid, self_id);
 	if (a_job_res->self)
 	{
