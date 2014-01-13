@@ -32,6 +32,8 @@ long long num_lookup_msg = 0LL;
 long long num_cswap_msg = 0LL;
 long long num_callback_msg = 0LL;
 
+FILE *job_output_file = NULL;
+
 pthread_mutex_t regist_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t num_job_fin_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t num_job_fail_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -43,6 +45,7 @@ pthread_mutex_t callback_msg_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t opt_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t time_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t job_output_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct timeval start, end;
 
@@ -66,10 +69,11 @@ void _print_result(struct timeval*, struct timeval*);
 int main(int argc, char *argv[])
 {
 	/* there should be 8 arguments provided to the controller */
-	if (argc < 9)
+	if (argc < 10)
 	{
 		fprintf(stderr, "usage:./controller slurm_conf_file numController memList "
-				"partitionSize workload zht_config_file zht_memlist num_proc_thread\n");
+				"partitionSize workload zht_config_file zht_memlist num_proc_thread "
+				"controller_index\n");
 		exit(1);
 	}
 
@@ -159,6 +163,12 @@ void _initialize(char* argv[])
 	c_zht_init(argv[6], argv[7]); // initialize the controller as a ZHT client
 
 	max_proc_thread = str_to_int(argv[8]);
+
+	char *job_output_path = c_calloc(100);
+	strcpy(job_output_path, "./job_output_");
+	strcat(job_output_path, argv[9]);
+	job_output_file = fopen(job_output_path, "w");
+	c_free(job_output_path);
 }
 
 void _read_memlist(char *mem_file_path)
@@ -353,7 +363,6 @@ void _step_complete_msg_proc(slurm_msg_t* msg)
 	/* get the job id */
 	char str_job_id[20] = { 0 };
 	sprintf(str_job_id, "%u", complete->job_id);
-
 	/* lookup for the origin controller id of this job */
 	char *origin_ctrlid = c_calloc(30);
 	c_zht_lookup(str_job_id, origin_ctrlid);
@@ -374,6 +383,10 @@ void _step_complete_msg_proc(slurm_msg_t* msg)
 		pthread_mutex_lock(&num_job_fin_mutex);
 		num_job_fin++;
 		pthread_mutex_unlock(&num_job_fin_mutex);
+		unsigned long time_in_micros = get_current_time();
+		pthread_mutex_lock(&job_output_mutex);
+		fprintf(job_output_file, "%u\tend time\t%lu\n", complete->job_id, time_in_micros);
+		pthread_mutex_unlock(&job_output_mutex);
 	}
 	else	// if it is not, then insert a notification message
 	{
@@ -438,4 +451,5 @@ void _print_result(struct timeval *end_time, struct timeval *start_time)
 	fprintf(stdout, "The number of all message to ZHT is:%lld\n", num_insert_msg +
 						num_lookup_msg + num_cswap_msg);
 	fflush(stdout);
+	fclose(job_output_file);
 }

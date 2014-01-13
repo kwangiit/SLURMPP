@@ -397,3 +397,11 @@ long long timeval_diff(struct timeval *difference, struct timeval *end_time,
 
 	return 1000000LL * difference->tv_sec + difference->tv_usec;
 }
+
+unsigned long get_current_time()
+{
+	struct timeval curr_time;
+	gettimeofday(&curr_time, 0x0);
+	unsigned long time_in_micros = 1000000 * curr_time.tv_sec + curr_time.tv_usec;
+	return time_in_micros;
+}

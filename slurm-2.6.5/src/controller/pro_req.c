@@ -279,13 +279,12 @@ void insert_jobinfo_zht(uint32_t job_id, job_resource *a_job_res)
 	pthread_mutex_unlock(&comswap_msg_mutex);*/
 }
 
-void _create_srun_job(srun_job_t **p_job, env_t *env,
+void _create_srun_job(srun_job_t **p_job, uint32_t jobid, env_t *env,
 						slurm_step_launch_callbacks_t *step_callbacks,
 						struct srun_options *opt_1)
 {
 
 	srun_job_t *job = NULL;
-	uint32_t job_id = 0;
 
 	if (part_size * num_ctrl < opt_1->min_nodes)
 	{
@@ -298,7 +297,7 @@ void _create_srun_job(srun_job_t **p_job, env_t *env,
 	{
 		job_resource *a_job_res = allocate_res(opt_1->min_nodes);
 		opt_1->nodelist = strdup(a_job_res->nodelist);
-		job = _job_create_1(opt_1);
+		job = _job_create_1(jobid, opt_1);
 		create_job_step_1(job, false, opt_1);
 		if (_become_user(opt_1) < 0)
 			info("Warning: Unable to assume uid=%u", opt_1->uid);
@@ -517,6 +516,10 @@ void check_job_belong(srun_job_t *job)
 			pthread_mutex_lock(&num_job_fin_mutex);
 			num_job_fin++;
 			pthread_mutex_unlock(&num_job_fin_mutex);
+			unsigned long time_in_micros = get_current_time();
+			pthread_mutex_lock(&job_output_mutex);
+			fprintf(job_output_file, "%u\tend time\t%lu\n", job->jobid, time_in_micros);
+			pthread_mutex_unlock(&job_output_mutex);
 		}
 	}
 	c_free(exist);
@@ -525,6 +528,14 @@ void check_job_belong(srun_job_t *job)
 
 extern void drun_proc(int count, char **job_char_desc)
 {
+	srand48(pthread_self());
+	uint32_t jobid = MIN_NOALLOC_JOBID +
+			((uint32_t) lrand48() %
+			 (MAX_NOALLOC_JOBID - MIN_NOALLOC_JOBID + 1));
+	unsigned long time_in_micros = get_current_time();
+	pthread_mutex_lock(&job_output_mutex);
+	fprintf(job_output_file, "%u\tstart time\t%lu\n", jobid, time_in_micros);
+	pthread_mutex_unlock(&job_output_mutex);
 	int debug_level;
 	env_t *env = xmalloc(sizeof(env_t));
 	log_options_t logopt = LOG_OPTS_STDERR_ONLY;
@@ -605,7 +616,7 @@ extern void drun_proc(int count, char **job_char_desc)
 
 	/* create a job structure of SLURM*/
 	srun_job_t *job = NULL;
-	_create_srun_job(&job, env, &step_callbacks, opt_1);
+	_create_srun_job(&job, jobid, env, &step_callbacks, opt_1);
 
 	opt_1->spank_job_env = NULL;
 	opt_1->spank_job_env_size = 0;
@@ -613,6 +624,10 @@ extern void drun_proc(int count, char **job_char_desc)
 	if (job)
 	{
 		_enhance_env(env, job, &step_callbacks, opt_1);
+		unsigned long time_in_micros = get_current_time();
+		pthread_mutex_lock(&job_output_mutex);
+		fprintf(job_output_file, "%u\tlaunch time\t%lu\n", job->jobid, time_in_micros);
+		pthread_mutex_unlock(&job_output_mutex);
 		launch_g_step_launch_1(job, &cio_fds, &global_rc, &step_callbacks, opt_1);
 
 		pthread_mutex_lock(&num_proc_thread_mutex);

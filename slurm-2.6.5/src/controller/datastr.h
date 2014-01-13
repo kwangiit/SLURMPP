@@ -9,6 +9,7 @@
 #define DATASTR_H_
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include "src/ZHT/src/c_zhtclient.h"
 #include "src/ZHT/src/meta.pb-c.h"
@@ -26,6 +27,7 @@ extern long long num_insert_msg;
 extern long long num_lookup_msg;
 extern long long num_cswap_msg;
 extern long long num_callback_msg;
+extern FILE *job_output_file;
 
 extern pthread_mutex_t num_job_fin_mutex;
 extern pthread_mutex_t num_job_fail_mutex;
@@ -37,6 +39,7 @@ extern pthread_mutex_t callback_msg_mutex;
 extern pthread_mutex_t opt_mutex;
 extern pthread_mutex_t global_mutex;
 extern pthread_mutex_t time_mutex;
+extern pthread_mutex_t job_output_mutex;
 
 typedef struct _queue_item
 {
@@ -86,5 +89,6 @@ extern void merge_res_str(char*, char*, char*);
 extern int get_size(char**);
 extern int find_exist(char**, char*, int);
 extern char* get_ctrl_res(char*);
+extern unsigned long get_current_time();
 extern long long timeval_diff(struct timeval*, struct timeval*, struct timeval*);
 #endif /* DATASTR_H_ */

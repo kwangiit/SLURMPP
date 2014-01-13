@@ -96,7 +96,7 @@ int initialize_and_process_args_1(int argc, char *argv[], struct srun_options* o
 
 int launch_tasks(launch_tasks_request_msg_t *launch_msg, char *nodelist);
 
-srun_job_t *_job_create_1(struct srun_options *opt_1);
+srun_job_t *_job_create_1(uint32_t jobid, struct srun_options *opt_1);
 
 int create_job_step_1(srun_job_t *job, bool use_all_cpus, struct srun_options *opt_1);
 

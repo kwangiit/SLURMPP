@@ -2396,7 +2396,7 @@ _job_create_structure_1(allocation_info_t *ainfo, struct srun_options *opt_1)
 	return (job);
 }
 
-srun_job_t *_job_create_1(struct srun_options *opt_1)
+srun_job_t *_job_create_1(uint32_t jobid, struct srun_options *opt_1)
 {
 	srun_job_t *job = NULL;
 
@@ -2411,8 +2411,9 @@ srun_job_t *_job_create_1(struct srun_options *opt_1)
 		goto error;
 	}
 	srand48(pthread_self());
-	ai->jobid = MIN_NOALLOC_JOBID + ((uint32_t)lrand48() %
-					(MAX_NOALLOC_JOBID - MIN_NOALLOC_JOBID + 1));
+	//ai->jobid = MIN_NOALLOC_JOBID + ((uint32_t)lrand48() %
+	//				(MAX_NOALLOC_JOBID - MIN_NOALLOC_JOBID + 1));
+	ai->jobid = jobid;
 	ai->stepid = (uint32_t)(lrand48());
 	ai->nodelist = opt_1->nodelist;
 	ai->nnodes = hostlist_count(hl);
