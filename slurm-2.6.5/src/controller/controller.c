@@ -327,6 +327,7 @@ void _regist_msg_proc(slurm_msg_t *msg)
 
 job_resource *_create_job_resource(char* jobid_origin_ctrlid)
 {
+	long num_lookup_msg_local = 0L;
 	job_resource *a_job_res = init_job_resource();
 
 	/* get the involved controller list in one dimension array*/
@@ -334,6 +335,7 @@ job_resource *_create_job_resource(char* jobid_origin_ctrlid)
 	strcat(jobid_origin_ctrlid_ctrls, jobid_origin_ctrlid);
 	strcat(jobid_origin_ctrlid_ctrls, "ctrls");
 	c_zht_lookup(jobid_origin_ctrlid_ctrls, a_job_res->ctrl_ids_1);
+	num_lookup_msg_local++;
 	c_free(jobid_origin_ctrlid_ctrls);
 
 	/* split the one dimension of involved controller list to two dimension */
@@ -349,8 +351,13 @@ job_resource *_create_job_resource(char* jobid_origin_ctrlid)
 		strcat(jobid_origin_ctrlid_invid, jobid_origin_ctrlid);
 		strcat(jobid_origin_ctrlid_invid, a_job_res->ctrl_ids_2[i]);
 		c_zht_lookup(jobid_origin_ctrlid_invid, a_job_res->node_alloc[i]);
+		num_lookup_msg_local++;
 		c_memset(jobid_origin_ctrlid_invid, strlen(jobid_origin_ctrlid_invid));
 	}
+
+	pthread_mutex_lock(&lookup_msg_mutex);
+	num_lookup_msg += num_lookup_msg_local;
+	pthread_mutex_unlock(&lookup_msg_mutex);
 
 	return a_job_res;
 }
@@ -366,6 +373,10 @@ void _step_complete_msg_proc(slurm_msg_t* msg)
 	/* lookup for the origin controller id of this job */
 	char *origin_ctrlid = c_calloc(30);
 	c_zht_lookup(str_job_id, origin_ctrlid);
+
+	pthread_mutex_lock(&lookup_msg_mutex);
+	num_lookup_msg++;
+	pthread_mutex_unlock(&lookup_msg_mutex);
 
 	/* concat to get the jobid+origin_ctrlid */
 	char *jobid_origin_ctrlid = c_calloc(strlen(origin_ctrlid) + 30 + 2);
@@ -394,6 +405,9 @@ void _step_complete_msg_proc(slurm_msg_t* msg)
 		strcat(key, jobid_origin_ctrlid);
 		strcat(key, "Fin");
 		c_zht_insert(key, "Finished");
+		pthread_mutex_lock(&insert_msg_mutex);
+		num_insert_msg++;
+		pthread_mutex_unlock(&insert_msg_mutex);
 		c_free(key);
 	}
 	c_free(origin_ctrlid);
@@ -448,8 +462,9 @@ void _print_result(struct timeval *end_time, struct timeval *start_time)
 	fprintf(stdout, "The number of insert message is:%lld\n", num_insert_msg);
 	fprintf(stdout, "The number of lookup message is:%lld\n", num_lookup_msg);
 	fprintf(stdout, "The number of compare_swap message is:%lld\n", num_cswap_msg);
+	fprintf(stdout, "The number of callback message is:%lld\n", num_callback_msg);
 	fprintf(stdout, "The number of all message to ZHT is:%lld\n", num_insert_msg +
-						num_lookup_msg + num_cswap_msg);
+						num_lookup_msg + num_cswap_msg + num_callback_msg);
 	fflush(stdout);
 	fclose(job_output_file);
 }

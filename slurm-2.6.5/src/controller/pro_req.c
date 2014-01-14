@@ -170,6 +170,9 @@ int do_allocate(
 		//(*p) += len;
 		char *nodelist = _allocate_node(ctrl_id, ctrl_res_copy, p,
 					num_node_attempt, num_node, query_value);
+		pthread_mutex_lock(&cswap_msg_mutex);
+		num_cswap_msg++;
+		pthread_mutex_unlock(&cswap_msg_mutex);
 		if (nodelist == NULL)
 		{
 			return 0;
@@ -189,6 +192,11 @@ int do_allocate(
 void allocate_one_res(char *ctrl_id, job_resource *a_job_res, int num_more_node)
 {
 	char *ctrl_res = get_ctrl_res(ctrl_id);
+
+	pthread_mutex_lock(&lookup_msg_mutex);
+	num_lookup_msg++;
+	pthread_mutex_unlock(&lookup_msg_mutex);
+
 	if (ctrl_res == NULL)
 	{
 		a_job_res->num_try++;
@@ -232,10 +240,12 @@ job_resource *allocate_res(int num_node_required)
 
 void insert_jobinfo_zht(uint32_t job_id, job_resource *a_job_res)
 {
+	long num_insert_msg_local = 0L;
 	/* insert (job_id, origin_ctrl_id) */
 	char str_job_id[20] = { 0 };
 	sprintf(str_job_id, "%u", job_id);
 	c_zht_insert(str_job_id, self_id);
+	num_insert_msg_local++;
 
 	/* insert (job_id + origin_ctrl_id + "ctrls", involved controllers),
 	 * if this job will be returned to the original  controller, then
@@ -246,12 +256,14 @@ void insert_jobinfo_zht(uint32_t job_id, job_resource *a_job_res)
 	if (a_job_res->self)
 	{
 		c_zht_insert(jobid_origin_ctrlid, "I am here");
+		num_insert_msg_local++;
 	}
 
 	char *jobid_origin_ctrlid_ctrls = c_calloc(strlen(jobid_origin_ctrlid) + 7);
 	strcat(jobid_origin_ctrlid_ctrls, jobid_origin_ctrlid);
 	strcat(jobid_origin_ctrlid_ctrls, "ctrls");
 	c_zht_insert(jobid_origin_ctrlid_ctrls, a_job_res->ctrl_ids_1);
+	num_insert_msg_local++;
 
 	/* for each involved controller, insert (job_id + origin_ctrl_id +
 	 * involved_ctrl_id, involved nodelist)*/
@@ -262,21 +274,17 @@ void insert_jobinfo_zht(uint32_t job_id, job_resource *a_job_res)
 		strcat(jobid_origin_ctrlid_invid, jobid_origin_ctrlid);
 		strcat(jobid_origin_ctrlid_invid, a_job_res->ctrl_ids_2[i]);
 		c_zht_insert(jobid_origin_ctrlid_invid, a_job_res->node_alloc[i]);
+		num_insert_msg_local++;
 		c_memset(jobid_origin_ctrlid_invid, strlen(jobid_origin_ctrlid_invid));
 	}
 	c_free(jobid_origin_ctrlid);
 	c_free(jobid_origin_ctrlid_ctrls);
 	c_free(jobid_origin_ctrlid_invid);
 	free_job_resource(a_job_res);
-	/*pthread_mutex_lock(&lookup_msg_mutex);
-	num_lookup_msg += num_lookup_msg_local;
-	pthread_mutex_unlock(&lookup_msg_mutex);
+
 	pthread_mutex_lock(&insert_msg_mutex);
 	num_insert_msg += num_insert_msg_local;
 	pthread_mutex_unlock(&insert_msg_mutex);
-	pthread_mutex_lock(&comswap_msg_mutex);
-	num_comswap_msg += num_comswap_msg_local;
-	pthread_mutex_unlock(&comswap_msg_mutex);*/
 }
 
 void _create_srun_job(srun_job_t **p_job, uint32_t jobid, env_t *env,
@@ -491,12 +499,23 @@ void check_job_belong(srun_job_t *job)
 	char *key = c_calloc(100);
 	strcpy(key, str); strcat(key, self_id);
 	c_zht_lookup(key, exist);
+	pthread_mutex_lock(&lookup_msg_mutex);
+	num_lookup_msg++;
+	pthread_mutex_unlock(&lookup_msg_mutex);
+
 	if (strcmp(exist, "I am here"))
 	{
 		strcat(key, "Fin");
-		char *fin = c_calloc(10);
-		//c_state_change_callback(key, "Finished");
-		c_zht_lookup(key, fin);
+		//char *fin = c_calloc(10);
+		long num_callback_msg_local = 0L;
+		int wait = 1;
+		while (c_state_change_callback(key, "Finished", wait) != 0)
+		{
+			num_callback_msg_local++;
+			wait *= 2;
+		}
+		num_callback_msg_local++;
+		/*c_zht_lookup(key, fin);
 		while (1)
 		{
 			if (!strcmp(fin, "Finished") || num_job_fin + num_job_fail >= num_job)
@@ -510,7 +529,7 @@ void check_job_belong(srun_job_t *job)
 				c_memset(fin, 10);
 				c_zht_lookup(key, fin);
 			}
-		}
+		}*/
 		if (num_job_fin + num_job_fail < num_job)
 		{
 			pthread_mutex_lock(&num_job_fin_mutex);
@@ -521,6 +540,9 @@ void check_job_belong(srun_job_t *job)
 			fprintf(job_output_file, "%u\tend time\t%lu\n", job->jobid, time_in_micros);
 			pthread_mutex_unlock(&job_output_mutex);
 		}
+		pthread_mutex_lock(&callback_msg_mutex);
+		num_callback_msg += num_callback_msg_local;
+		pthread_mutex_unlock(&callback_msg_mutex);
 	}
 	c_free(exist);
 	c_free(key);

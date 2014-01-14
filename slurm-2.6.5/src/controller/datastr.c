@@ -128,6 +128,7 @@ extern void release_res(job_resource *a_job_res)
 		char *ctrl_pre_res_backup = c_calloc((part_size + 1) * 30);
 		char *ctrl_add_res_backup = c_calloc((part_size + 1) * 30);
 
+		long num_cswap_msg_local = 0L, num_lookup_msg_local = 0L;
 		int i = 0;
 		for (; i < a_job_res->num_ctrl; i++)
 		{
@@ -135,12 +136,14 @@ extern void release_res(job_resource *a_job_res)
 			c_memset(ctrl_pre_res_backup, (part_size + 1) * 30);
 			c_memset(ctrl_add_res_backup, (part_size + 1) * 30);
 			char *ctrl_pre_res = get_ctrl_res(a_job_res->ctrl_ids_2[i]);
+			num_lookup_msg_local++;
 			strcpy(ctrl_pre_res_backup, ctrl_pre_res);
 			strcpy(ctrl_add_res_backup, a_job_res->node_alloc[i]);
 			while (1)
 			{
 				c_memset(result, (part_size + 1) * 30);
 				merge_res_str(ctrl_pre_res_backup, ctrl_add_res_backup, result);
+				num_cswap_msg_local++;
 				if (c_zht_compare_swap(a_job_res->ctrl_ids_2[i],
 						ctrl_pre_res, result, query_value) != 0)
 				{
@@ -162,6 +165,13 @@ extern void release_res(job_resource *a_job_res)
 		c_free(result);
 		c_free(ctrl_pre_res_backup);
 		c_free(ctrl_add_res_backup);
+
+		pthread_mutex_lock(&cswap_msg_mutex);
+		num_cswap_msg += num_cswap_msg_local;
+		pthread_mutex_unlock(&cswap_msg_mutex);
+		pthread_mutex_lock(&lookup_msg_mutex);
+		num_lookup_msg += num_lookup_msg_local;
+		pthread_mutex_unlock(&lookup_msg_mutex);
 	}
 }
 
