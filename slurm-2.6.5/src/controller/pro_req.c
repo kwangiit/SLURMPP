@@ -255,8 +255,11 @@ void insert_jobinfo_zht(uint32_t job_id, job_resource *a_job_res)
 	strcat(jobid_origin_ctrlid, self_id);
 	if (a_job_res->self)
 	{
-		c_zht_insert(jobid_origin_ctrlid, "I am here");
-		num_insert_msg_local++;
+		if (find_exist(a_job_res->ctrl_ids_2, self_id, a_job_res->num_ctrl) >=0 )
+		{
+			c_zht_insert(jobid_origin_ctrlid, "I am here");
+			num_insert_msg_local++;
+		}
 	}
 
 	char *jobid_origin_ctrlid_ctrls = c_calloc(strlen(jobid_origin_ctrlid) + 7);
