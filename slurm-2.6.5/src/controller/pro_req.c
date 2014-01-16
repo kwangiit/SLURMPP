@@ -232,6 +232,7 @@ job_resource *allocate_res(int num_node_required)
 		{
 			release_res(a_job_res);
 			reset_job_resource(a_job_res);
+			usleep(100000);
 		}
 		ctrl_id = mem_list[_gen_random_value(num_ctrl)];
 	}
